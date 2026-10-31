@@ -345,6 +345,8 @@ input[type="range"] { width: 100%; accent-color: var(--ember); height: 18px; }
 .dialog h2 { margin: 0; padding: 15px 18px 0; font-size: 18px; }
 .dialog .body { padding: 9px 18px 14px; color: var(--ink-2); overflow-y: auto; }
 .dialog .body p { margin: 0 0 8px; }
+.cloud-file { display: flex; align-items: center; gap: 4px; }
+.cloud-file > button:first-child { flex: 1; min-width: 0; }
 .dialog footer { display: flex; justify-content: flex-end; gap: 7px; padding: 11px 18px; border-top: 1px solid var(--line-soft); }
 
 .files { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }

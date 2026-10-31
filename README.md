@@ -1,6 +1,6 @@
 # Fight Arena NBT Builder
 
-A single page app for making the game's `.nbt` files. Double-click `index.html`, or run `npm start` and go to http://localhost:5180. It needs no install and works offline.
+A single page app for making the game's `.nbt` files. Double-click `index.html`, or run `npm start` and go to http://localhost:5180. It needs no install and works offline. Only the cloud needs `npm start` and a connection.
 
 | Mode | Makes | Game folder | Loaded in game |
 | --- | --- | --- | --- |
@@ -15,6 +15,12 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 3. Press `]` for the next wave or cell, and `Ctrl+S` to save. Your work is kept as a draft if you close the page.
 
 `orc 5`, `5 orc`, `orc x5` and `orc*5` all mean five orcs. Press `?` in the app for every key.
+
+## Cloud
+
+Click **Cloud** and sign in with Google, using `npm start` (sign-in cannot come back to a page opened from disk). Save then also copies the file to the cloud, and Cloud lists, opens and deletes your files of the current kind. The game still reads files from its own folders, so a file opened from the cloud needs a Save to reach the game.
+
+Files are in the `fa_files` table of the D&D DB Supabase project, one row per kind and name, and each user sees only their own. Saving a name that is already there replaces it. The project's Auth URL settings must allow `http://localhost:5180`.
 
 ## What gets written
 

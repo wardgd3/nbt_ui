@@ -84,6 +84,7 @@
 		tune: 'M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6h4V4zM6 14v6h4v-6z',
 		close: 'M6 6l12 12M18 6 6 18',
 		folder: 'M3 20V5h6l2 3h10v12z',
+		cloud: 'M7 19a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9a5 5 0 0 1-.5 10z',
 		search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
 		reset: 'M4 12a8 8 0 1 0 3-6.2M4 4v5h5',
 		plus: 'M12 5v14M5 12h14',
@@ -312,6 +313,7 @@
 				btn('redo', 'Redo', () => travel(redo, undo, 'redo'), {class: 'icon ghost', disabled: !redo[S.mode].length, title: 'Redo (Ctrl+Y)'}),
 				btn('reset', 'New', newDoc, {text: 'New', title: 'Start a new file of this kind'}),
 				btn('open', 'Open', openFile, {text: 'Open', title: 'Open a file (Ctrl+O)'}),
+				btn('cloud', 'Cloud', cloudDialog, {text: 'Cloud', title: Cloud.user() ? `Cloud files for ${Cloud.user()}` : 'Sign in to keep files in the cloud'}),
 				btn('save', 'Save', saveFile, {class: 'primary', text: 'Save', title: 'Save (Ctrl+S)'})),
 		));
 	}
@@ -1081,6 +1083,7 @@
 			saved[mode] = snapshot(mode);
 			saveDraft();
 			renderTop();
+			if (Cloud.user()) await saveToCloud(mode, name);
 		} catch (e) {
 			if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
 		}
@@ -1107,11 +1110,17 @@
 		}
 		if (kind === 'castle') return toast('That is a Castle file. This app makes waves, Colosseum and Temple files.', 'bad');
 		if (!kind) return toast(`${name} is not a waves, Colosseum or Temple file`, 'bad');
+		adopt(kind, Model.fromFile(root, kind), name.replace(OK_EXT, ''), name);
+		toast(`Opened ${name}`, 'good');
+	}
+
+	/** A whole document taken in. `opened` is the file on disk it came from, if any. */
+	function adopt(kind, read, name, opened) {
 		commit();
 		S.mode = kind;
-		S.docs[kind] = Model.fromFile(root, kind);
-		S.names[kind] = name.replace(OK_EXT, '');
-		S.opened[kind] = name;
+		S.docs[kind] = read;
+		S.names[kind] = name;
+		S.opened[kind] = opened;
 		S.sel[kind] = kind === 'temple' ? 'run' : 1;
 		last[kind] = saved[kind] = snapshot(kind);
 		undo[kind].length = 0;
@@ -1120,7 +1129,6 @@
 		S.tuneOpen = null;
 		saveDraft();
 		render();
-		toast(`Opened ${name}`, 'good');
 	}
 
 	/** A file picked: from the linked folder's list when there is one, else with the browser's picker. */
@@ -1156,6 +1164,60 @@
 	async function openFile() {
 		const file = await chooseFile(S.mode);
 		if (file) await loadBytes(file.name, new Uint8Array(await file.bytes()));
+	}
+
+	// --- cloud ---
+
+	/** A failed upload is told apart from the save itself, which has already landed. */
+	async function saveToCloud(mode, name) {
+		try {
+			await Cloud.put(mode, name.replace(OK_EXT, ''), S.docs[mode]);
+			toast(`Saved to the cloud too`, 'good');
+		} catch (e) {
+			toast(`Not saved to the cloud: ${e.message}`, 'bad');
+			renderTop();
+		}
+	}
+
+	async function cloudDialog() {
+		commit();
+		if (!Cloud.canSignIn()) return ask('Cloud', 'Google sign-in needs a web address, so the cloud is off when index.html is opened directly. Run npm start and use http://localhost:5180.');
+		if (!Cloud.user()) {
+			if (await ask('Cloud', 'Sign in to keep your files online. Save then also copies each file to the cloud, and you can open them on any computer.', [['Cancel', null], ['Sign in with Google', true, 'primary']])) Cloud.signIn();
+			return;
+		}
+		const mode = S.mode;
+		let files;
+		try {
+			files = await Cloud.list(mode);
+		} catch (e) {
+			renderTop();
+			return toast(`Could not reach the cloud: ${e.message}`, 'bad');
+		}
+		const when = f => new Date(f.updated_at).toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+		const pick = await ask(`Cloud ${FOLDERS[mode]}`, close => [h('p', {}, Cloud.user()), files.length ? h('div', {class: 'files'}, files.map(f => h('div', {class: 'cloud-file'},
+			h('button', {type: 'button', onclick: () => close({open: f})}, h('span', {}, `${f.name}.nbt`), h('small', {}, when(f))),
+			btn('clear', `Delete ${f.name}`, () => close({drop: f}), {class: 'small icon ghost danger'}))))
+			: h('p', {}, 'Nothing here yet. Save puts the file you are working on here.')], [['Sign out', 'out'], ['Close', null]]);
+		if (pick === 'out') {
+			Cloud.signOut();
+			renderTop();
+			return toast('Signed out');
+		}
+		try {
+			if (pick?.open) {
+				const row = await Cloud.get(pick.open.id);
+				if (row.kind === 'temple') Model.upgrade(row.doc);
+				adopt(row.kind, row.doc, row.name, null);
+				toast(`Opened ${row.name} from the cloud`, 'good');
+			} else if (pick?.drop && await ask('Delete this file?', `${pick.drop.name}.nbt goes from the cloud for good. Files on this computer stay.`, [['Cancel', null], ['Delete', true, 'primary']])) {
+				await Cloud.remove(pick.drop.id);
+				toast(`Deleted ${pick.drop.name} from the cloud`);
+				return cloudDialog();
+			}
+		} catch (e) {
+			toast(`Cloud: ${e.message}`, 'bad');
+		}
 	}
 
 	// --- keeping the caret where it was ---
@@ -1233,7 +1295,10 @@
 	for (const mode of Object.keys(S.docs)) saved[mode] = snapshot(mode);
 	loadDraft();
 	for (const mode of Object.keys(S.docs)) last[mode] = snapshot(mode);
+	const back = Cloud.takeRedirect();
 	render();
+	if (back === 'in') toast(`Signed in as ${Cloud.user()}`, 'good');
+	else if (back) toast(`Could not sign in: ${back}`, 'bad');
 	if (hasFolderApi()) {
 		loadHandle().then(async handle => {
 			if (!handle) return;
