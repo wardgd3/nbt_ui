@@ -1,0 +1,11 @@
+{
+  "name": "nbt_ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fight Arena NBT builder: waves, Colosseum and Temple files",
+  "scripts": {
+    "start": "node tools/serve.js",
+    "gen": "node tools/gen-data.js",
+    "test": "node --test"
+  }
+}
