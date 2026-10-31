@@ -6,7 +6,7 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 | --- | --- | --- | --- |
 | Waves | wave save (`FightArenaWaves`) | `wave saves` | Admin page, Waves, Import |
 | Colosseum | `fight_arena_colosseum` | `colosseum` | Admin page, Colosseum, or a wave, or Game Setup |
-| Temple | `fight_arena_temple` | `temple` | Admin page, Temple, Import file |
+| Temple | `fight_arena_temple` | `temple saves` | Admin page, Temple, Import file |
 
 ## Fast use
 

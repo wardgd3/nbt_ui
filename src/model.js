@@ -12,7 +12,7 @@ const Model = (() => {
 		size: [0.25, 3], health: [0.1, 5], speed: [0.25, 3], damage: [0.1, 5],
 	};
 	const SHAPES = ['classic', 'ring', 'column'];
-	const FOLDERS = {waves: 'wave saves', colosseum: 'colosseum', temple: 'temple'};
+	const FOLDERS = {waves: 'wave saves', colosseum: 'colosseum', temple: 'temple saves'};
 	const COLOSSEUM_KIND = 'fight_arena_colosseum', CASTLE_KIND = 'fight_arena_castle', TEMPLE_KIND = 'fight_arena_temple';
 	const STATS = [1000, 600, 18, 16, 100, 150, 0, 140, 3, 8, 100, 800, 20, 18, 100, 1000, 250, 8, 1, 1, 250, 40, 100, 100, 600, 600, 3, 36];
 	const TEMPLE_DEFAULTS = {boss: 'dynamic_difficulty:magma_golem', bossScale: 4, bossHealth: 600, lives: 3, safeRewards: [1000, 1000, 40000]};
