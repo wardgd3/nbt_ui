@@ -155,7 +155,8 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 
 .ring-wrap { padding: 12px 22px 4px; }
 .ring { width: 100%; height: auto; max-height: 250px; }
-.ring .cell { cursor: pointer; stroke: var(--bg); stroke-width: 1.5; transition: filter .1s; }
+.ring .cell { cursor: pointer; stroke: var(--bg); stroke-width: 1.5; outline: none; -webkit-tap-highlight-color: transparent; transition: filter .1s; }
+.ring .cell:focus-visible { stroke: var(--ember); stroke-width: 2; }
 .ring .cell:hover { filter: brightness(1.25); }
 .ring .cell.on { stroke: var(--ink); stroke-width: 2; }
 .ring text { pointer-events: none; font: 700 11px var(--font); text-anchor: middle; dominant-baseline: central; }
