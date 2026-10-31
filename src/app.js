@@ -9,6 +9,9 @@
 	const GROUP_COLORS = ['#f0813a', '#58b0d1', '#8dbb6f', '#a585e0', '#e9b44c', '#e26aa2', '#4fc1a6', '#d17f4e', '#7f9be8', '#c9c262', '#e8604f', '#8d97a3', '#b6946c', '#c58be0', '#68c4e0'];
 	const MODES = [['waves', 'Waves'], ['colosseum', 'Colosseum'], ['temple', 'Temple']];
 	const LEVELS = [[1, 'Level 1'], [2, 'Level 2'], [3, 'Level 3'], [0, 'Tunnels']];
+	/** The colosseum rooms' names; which of a room's six gates each of its four cells is, round from the way in. */
+	const ROOM_NAMES = {classic: 'Standard', ring: 'Ring', column: 'Cylinder'};
+	const ROOM_GATES = [null, 1, 2, 4, 5];
 	const DRAFT_KEY = 'nbt_ui.draft.v1';
 	const OK_EXT = /\.nbt$/i;
 
@@ -19,6 +22,7 @@
 		names: {waves: 'waves', colosseum: 'colosseum', temple: 'temple'},
 		opened: {waves: null, colosseum: null, temple: null},
 		level: 1,
+		gate: 1,
 		onlyChanged: false,
 		query: '',
 		hit: 0,
@@ -33,6 +37,13 @@
 	const last = {}, saved = {}, undo = {waves: [], colosseum: [], temple: []}, redo = {waves: [], colosseum: [], temple: []};
 
 	const doc = () => S.docs[S.mode];
+	/** The colosseum room being edited, if any: picked in the Temple as room1, room2 or room3, by its level. */
+	const room = () => (S.mode === 'temple' && typeof S.sel.temple === 'string' && S.sel.temple !== 'run' ? doc().colosseums.find(r => `room${r.level}` === S.sel.temple) : null);
+	/** A Temple Mob Spawn's plain list, not a colosseum room's line-up. */
+	const plainList = () => S.mode === 'temple' && !room();
+	/** What holds the cells, rounds and mob settings being edited: the Colosseum file, or a colosseum room's. */
+	const arena = () => room()?.config || doc();
+	const cellNow = () => (room() ? S.gate : S.sel.colosseum);
 	const snapshot = mode => JSON.stringify(S.docs[mode]);
 	const dirty = mode => snapshot(mode) !== saved[mode];
 
@@ -131,10 +142,11 @@
 		const d = doc(), at = S.sel[S.mode];
 		if (S.mode === 'waves') return d.waves[at];
 		if (S.mode === 'colosseum') return d.cells[at];
+		if (room()) return room().config.cells[S.gate];
 		return at === 'run' ? null : d.spawns[at].entries;
 	}
 
-	const maxCount = () => (S.mode === 'temple' ? LIMITS.spawnCount[1] : LIMITS.count);
+	const maxCount = () => (plainList() ? LIMITS.spawnCount[1] : LIMITS.count);
 	const headcount = list => list.reduce((n, l) => n + (l.count || 0), 0);
 
 	function faction(list) {
@@ -187,7 +199,7 @@
 		to[mode].push(last[mode]);
 		last[mode] = from[mode].pop();
 		S.docs[mode] = JSON.parse(last[mode]);
-		if (mode === 'temple' && S.sel.temple !== 'run' && !S.docs.temple.spawns[S.sel.temple]) S.sel.temple = 'run';
+		if (mode === 'temple' && S.sel.temple !== 'run' && !room() && !S.docs.temple.spawns[S.sel.temple]) S.sel.temple = 'run';
 		S.swap = null;
 		saveDraft();
 		render();
@@ -209,6 +221,7 @@
 			Object.assign(S.sel, draft.sel);
 			if (draft.mode) S.mode = draft.mode;
 			Object.assign(saved, draft.saved);
+			Model.upgrade(S.docs.temple);
 		} catch { /* A draft that cannot be read is passed over. */ }
 	}
 
@@ -217,7 +230,7 @@
 	function addMob(id, count = 1) {
 		const list = lines();
 		if (!list) return toast('Pick a Mob Spawn first');
-		const temple = S.mode === 'temple';
+		const temple = plainList();
 		if (S.swap != null && list[S.swap]) {
 			const line = list[S.swap];
 			line.mob = id;
@@ -240,11 +253,13 @@
 		commit();
 		if (S.mode === 'waves') S.sel.waves = ((S.sel.waves - 1 + by + 40) % 40) + 1;
 		else if (S.mode === 'colosseum') S.sel.colosseum = ((S.sel.colosseum - 1 + by + 15) % 15) + 1;
+		else if (room()) S.gate = ((S.gate - 1 + by + LIMITS.roomCells) % LIMITS.roomCells) + 1;
 		else {
 			const order = templeOrder();
 			const at = order.indexOf(S.sel.temple);
 			S.sel.temple = order[(at + by + order.length) % order.length];
-			if (S.sel.temple !== 'run') S.level = doc().spawns[S.sel.temple].level;
+			if (room()) S.level = room().level;
+			else if (S.sel.temple !== 'run') S.level = doc().spawns[S.sel.temple].level;
 		}
 		S.swap = null;
 		S.tuneOpen = null;
@@ -252,12 +267,13 @@
 		document.querySelector('[aria-current="true"]')?.scrollIntoView({block: 'nearest'});
 	}
 
-	const templeOrder = () => ['run', ...LEVELS.flatMap(([level]) => doc().spawns.map((sp, i) => (sp.level === level ? i : -1)).filter(i => i >= 0))];
+	const templeOrder = () => ['run', ...LEVELS.flatMap(([level]) => [...doc().spawns.map((sp, i) => (sp.level === level ? i : -1)).filter(i => i >= 0),
+		...doc().colosseums.filter(r => r.level === level).map(r => `room${r.level}`)])];
 
 	function copyLines() {
 		const list = lines();
 		if (!list) return;
-		S.clip = {temple: S.mode === 'temple', lines: Model.clone(list)};
+		S.clip = {temple: plainList(), lines: Model.clone(list)};
 		toast(`Copied ${list.length} line${list.length === 1 ? '' : 's'}`);
 		renderHead();
 	}
@@ -265,7 +281,7 @@
 	function pasteLines() {
 		const list = lines();
 		if (!list || !S.clip) return;
-		const temple = S.mode === 'temple';
+		const temple = plainList();
 		const incoming = S.clip.lines.map(l => (temple ? {mob: l.mob, count: Math.min(maxCount(), l.count)}
 			: S.clip.temple ? Model.line(l.mob, l.count, heavy(l.mob) ? 'exact' : 'table') : Model.clone(l)));
 		list.splice(0, list.length, ...incoming);
@@ -347,8 +363,9 @@
 		];
 	}
 
-	function railColosseum() {
-		const d = doc();
+	/** Release order and timing, for the Colosseum's rail - or, in rounds, a colosseum room's panel. */
+	function arenaSettings(d, inRoom) {
+		const word = inRoom ? 'Round' : 'Group', most = inRoom ? LIMITS.roomCells : LIMITS.cells;
 		const toggle = g => {
 			const at = d.offGroups.indexOf(g);
 			if (at >= 0) d.offGroups.splice(at, 1);
@@ -372,25 +389,78 @@
 				},
 				onblur: e => { e.target.value = d[key]; }}));
 		return [
-			h('div', {class: 'ring-wrap'}, ring()),
-			h('div', {class: 'scroll'},
 				h('div', {class: 'sect'},
-					h('header', {}, h('span', {class: 'eyebrow'}, 'Release order')),
+					h('header', {}, h('span', {class: 'eyebrow'}, inRoom ? 'Rounds' : 'Release order')),
 					h('div', {class: 'groups'},
 						Array.from({length: d.groups}, (_, i) => i + 1).map(g => h('button', {type: 'button', class: `chip ${d.offGroups.includes(g) ? 'off' : ''}`, style: `--c:${GROUP_COLORS[(g - 1) % 15]}`,
-							title: 'Click to switch on or off, Shift+click to remove', onclick: e => (e.shiftKey ? removeGroup(g) : toggle(g))}, h('i'), `Group ${g}`)),
-						d.groups < LIMITS.cells ? h('button', {type: 'button', class: 'chip', onclick: () => { d.groups++; hard(); }}, '+ Group') : null)),
-				h('div', {class: 'sect'},
+							title: 'Click to switch on or off, Shift+click to remove', onclick: e => (e.shiftKey ? removeGroup(g) : toggle(g))}, h('i'), `${word} ${g}`)),
+						d.groups < most ? h('button', {type: 'button', class: 'chip', onclick: () => { d.groups++; hard(); }}, `+ ${word}`) : null)),
+				inRoom ? null : h('div', {class: 'sect'},
 					h('header', {}, h('span', {class: 'eyebrow'}, 'Map')),
 					seg(SHAPES.map(v => [v, v[0].toUpperCase() + v.slice(1)]), d.shape, v => { d.shape = v; hard(); })),
 				h('div', {class: 'sect'},
 					h('header', {}, h('span', {class: 'eyebrow'}, 'Timing and pay')),
 					h('div', {class: 'fields'},
 						number('First gates, sec', 'startDelay', LIMITS.startDelay),
-						number('Between groups, sec', 'delay', LIMITS.delay),
+						number(`Between ${word.toLowerCase()}s, sec`, 'delay', LIMITS.delay),
 						number('Gate rise, sec', 'raise', LIMITS.raise),
-						number('Win credits, 0 = own', 'reward', LIMITS.reward)))),
+						number(inRoom ? 'Win credits' : 'Win credits, 0 = own', 'reward', LIMITS.reward))),
 		];
+	}
+
+	function railColosseum() {
+		return [h('div', {class: 'ring-wrap'}, ring()), h('div', {class: 'scroll'}, arenaSettings(doc(), false))];
+	}
+
+	/** A colosseum room seen from above: its six gates round the floor, the way in north, the way on south, and its four cells to fill. */
+	function roomRing(r) {
+		const d = r.config, cx = 120, cy = 120, inner = 62, outer = 116, half = Math.PI / 6 - 0.03;
+		const point = (radius, a) => [cx + radius * Math.cos(a), cy + radius * Math.sin(a)];
+		const svg = s('svg', {class: 'ring', viewBox: '0 0 240 240', role: 'group', 'aria-label': `${ROOM_NAMES[r.shape]} colosseum gates`});
+		const arc = a => {
+			const [p, q, e, f] = [point(inner, a - half), point(outer, a - half), point(outer, a + half), point(inner, a + half)];
+			return `M${p}L${q}A${outer} ${outer} 0 0 1 ${e}L${f}A${inner} ${inner} 0 0 0 ${p}Z`;
+		};
+		[[0, 'IN'], [3, 'ON']].forEach(([gate, word]) => {
+			const a = -Math.PI / 2 + gate * Math.PI / 3;
+			svg.append(s('path', {class: 'way', d: arc(a)}));
+			const [tx, ty] = point((inner + outer) / 2, a);
+			svg.append(s('text', {x: tx, y: ty, fill: 'var(--ink-3)'}, word));
+		});
+		let total = 0;
+		for (let c = 1; c <= LIMITS.roomCells; c++) {
+			const a = -Math.PI / 2 + ROOM_GATES[c] * Math.PI / 3, list = d.cells[c], group = d.cellGroups[c];
+			total += headcount(list);
+			const off = group && d.offGroups.includes(group);
+			const fill = !list.length ? 'var(--raised)' : group ? GROUP_COLORS[(group - 1) % 15] : '#6f665d';
+			svg.append(s('path', {class: `cell ${S.gate === c ? 'on' : ''}`, fill, opacity: off ? .35 : 1, d: arc(a), tabindex: 0, role: 'button', 'aria-label': `Gate ${c}`,
+				onclick: () => pickGate(c),
+				onkeydown: ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pickGate(c); } }}));
+			const [tx, ty] = point((inner + outer) / 2, a);
+			svg.append(s('text', {x: tx, y: ty, fill: list.length ? '#17120e' : 'var(--ink-3)'}, c));
+		}
+		svg.append(s('text', {class: 'mid', x: cx, y: cy - 6}, total), s('text', {class: 'sub', x: cx, y: cy + 13}, 'MOBS'));
+		return svg;
+	}
+
+	function pickGate(c) {
+		commit();
+		S.gate = c;
+		S.swap = null;
+		S.tuneOpen = null;
+		renderEditor();
+		renderPalette();
+	}
+
+	/** What fills the main area for a colosseum room: its gates, rounds and timing beside the picked gate's line-up. */
+	function roomPanel(r) {
+		const empty = Object.values(r.config.cells).every(list => !list.length);
+		return h('div', {class: 'room-edit'},
+			h('div', {class: 'room-side'},
+				h('div', {class: 'ring-wrap'}, roomRing(r)),
+				empty ? h('p', {class: 'room-note'}, 'With every gate empty, this room plays its own mix: four creatures a gate, all at once.') : null,
+				arenaSettings(r.config, true)),
+			h('div', {class: 'room-main'}, cellBar(), h('div', {class: 'scroll'}, lineList(lines()))));
 	}
 
 	/** The fifteen cells, round the floor as they stand in the game; the first three are the big ones. */
@@ -435,13 +505,14 @@
 			render();
 		};
 		const inLevel = d.spawns.map((sp, i) => ({sp, i})).filter(({sp}) => sp.level === S.level);
+		const final = d.colosseums.find(r => r.level === S.level);
 		const rooms = new Map();
 		for (const one of inLevel) {
 			const key = one.sp.room || 0;
 			if (!rooms.has(key)) rooms.set(key, []);
 			rooms.get(key).push(one);
 		}
-		const pad = 26, xs = inLevel.map(o => o.sp.x), zs = inLevel.map(o => o.sp.z);
+		const pad = 26, xs = inLevel.map(o => o.sp.x).concat(final ? [final.middle[0]] : []), zs = inLevel.map(o => o.sp.z).concat(final ? [final.middle[1]] : []);
 		const box = [Math.min(...xs) - pad, Math.min(...zs) - pad, Math.max(...xs) - Math.min(...xs) + pad * 2, Math.max(...zs) - Math.min(...zs) + pad * 2];
 		const dotSize = Math.max(box[2], box[3]) / 42;
 		const map = s('svg', {class: 'map', viewBox: box.join(' '), role: 'group', 'aria-label': `${S.level ? `Level ${S.level}` : 'Tunnels'} from above`});
@@ -451,13 +522,22 @@
 				stroke: at === i ? 'var(--ink)' : 'none', 'stroke-width': dotSize / 2, onclick: () => pick(i)},
 			s('title', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty')));
 		}
+		if (final) {
+			map.append(s('circle', {class: 'map-room', cx: final.middle[0], cy: final.middle[1], r: dotSize * (at === `room${final.level}` ? 4 : 3), onclick: () => pick(`room${final.level}`)},
+				s('title', {}, `Colosseum: ${ROOM_NAMES[final.shape]}`)));
+		}
+		const finalMobs = final ? Object.values(final.config.cells).reduce((n, list) => n + headcount(list), 0) : 0;
 		return [
 			h('div', {class: 'pad'},
 				h('button', {type: 'button', class: 'chip', style: 'width:100%;justify-content:center', 'aria-pressed': String(at === 'run'), onclick: () => pick('run')}, 'Boss, lives and rewards')),
 			h('div', {style: 'padding:0 14px'},
 				seg(LEVELS, S.level, level => { S.level = level; renderRail(); }),
 				map),
-			h('div', {class: 'scroll', style: 'margin-top:6px'}, [...rooms.entries()].map(([room, list]) => [
+			h('div', {class: 'scroll', style: 'margin-top:6px'}, final ? [
+				h('div', {class: 'room-head eyebrow'}, 'Last room before the safe room'),
+				h('button', {type: 'button', class: 'spawn-row colosseum-row', 'aria-current': String(at === `room${final.level}`), onclick: () => pick(`room${final.level}`)},
+					h('i'), h('span', {}, `Colosseum: ${ROOM_NAMES[final.shape]}`), h('small', {}, finalMobs ? `${finalMobs} mobs` : 'own mix')),
+			] : null, [...rooms.entries()].map(([room, list]) => [
 				h('div', {class: 'room-head eyebrow'}, room ? `Room ${room}` : 'Off the main path'),
 				list.map(({sp, i}) => h('button', {type: 'button', class: 'spawn-row', 'aria-current': String(at === i), style: `--c:${sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)'}`, onclick: () => pick(i)},
 					h('i'), h('span', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty'), h('small', {}, `r${sp.range}`))),
@@ -471,6 +551,7 @@
 		const at = S.sel[S.mode];
 		if (S.mode === 'waves') return `Wave ${at}`;
 		if (S.mode === 'colosseum') return `Cell ${at}${at <= 3 ? ' · big cell' : ''}`;
+		if (room()) return `Colosseum: ${ROOM_NAMES[room().shape]} · Gate ${S.gate}`;
 		if (at === 'run') return 'Boss, lives and rewards';
 		const sp = doc().spawns[at];
 		return `${sp.room ? `Room ${sp.room}` : 'Tunnel'} Mob Spawn`;
@@ -485,7 +566,8 @@
 			parts.push('one player on Normal');
 			return h('div', {class: 'sub'}, parts.join(' · '), Model.isWritten(doc(), S.sel.waves) ? null : h('b', {}, ' · changed'));
 		}
-		if (S.mode === 'temple') {
+		if (room()) parts.push(`Level ${room().level}, last before the safe room`);
+		else if (S.mode === 'temple') {
 			const sp = doc().spawns[S.sel.temple];
 			parts.push(`at ${sp.x}, ${sp.y}, ${sp.z}`);
 		}
@@ -516,7 +598,8 @@
 			const body = [];
 			if (S.mode === 'colosseum') body.push(cellBar());
 			const list = lines();
-			body.push(h('div', {class: 'scroll'}, list ? lineList(list) : runSettings(), S.mode === 'waves' ? attachBar() : null));
+			if (room()) body.push(roomPanel(room()));
+			else body.push(h('div', {class: 'scroll'}, list ? lineList(list) : runSettings(), S.mode === 'waves' ? attachBar() : null));
 			editor.replaceChildren(h('div', {class: 'ed-head'}), ...body);
 		});
 		renderHead();
@@ -526,14 +609,14 @@
 	}
 
 	function cellBar() {
-		const d = doc(), c = S.sel.colosseum, now = d.cellGroups[c] || 0;
-		const options = [[0, 'First group'], ...Array.from({length: d.groups}, (_, i) => [i + 1, `Group ${i + 1}`])];
-		return h('div', {class: 'ed-sub'}, h('span', {class: 'eyebrow'}, 'Released with'), options.map(([g, label]) => h('button', {type: 'button', class: 'chip', 'aria-pressed': String(g === now), style: g ? `--c:${GROUP_COLORS[(g - 1) % 15]}` : '', onclick: () => setGroup(g)}, g ? h('i') : null, label)),
-			h('button', {type: 'button', class: 'chip', onclick: () => { d.groups++; setGroup(d.groups); }}, '+ New group'));
+		const d = arena(), c = cellNow(), now = d.cellGroups[c] || 0, word = room() ? 'Round' : 'Group', most = room() ? LIMITS.roomCells : LIMITS.cells;
+		const options = [[0, `First ${word.toLowerCase()}`], ...Array.from({length: d.groups}, (_, i) => [i + 1, `${word} ${i + 1}`])];
+		return h('div', {class: 'ed-sub'}, h('span', {class: 'eyebrow'}, room() ? 'Comes out in' : 'Released with'), options.map(([g, label]) => h('button', {type: 'button', class: 'chip', 'aria-pressed': String(g === now), style: g ? `--c:${GROUP_COLORS[(g - 1) % 15]}` : '', onclick: () => setGroup(g)}, g ? h('i') : null, label)),
+			d.groups < most ? h('button', {type: 'button', class: 'chip', onclick: () => { d.groups++; setGroup(d.groups); }}, `+ New ${word.toLowerCase()}`) : null);
 	}
 
 	function setGroup(g) {
-		const d = doc(), c = S.sel.colosseum;
+		const d = arena(), c = cellNow();
 		if (g && g > d.groups) return;
 		if (g) d.cellGroups[c] = g;
 		else delete d.cellGroups[c];
@@ -573,7 +656,7 @@
 		if (!list.length) {
 			return h('div', {class: 'empty'}, h('b', {}, 'Nothing here yet'), 'Pick mobs from the list on the right, or press ', h('kbd', {}, '/'), ' and type a name like ', h('kbd', {}, 'orc 5'));
 		}
-		const temple = S.mode === 'temple';
+		const temple = plainList();
 		const box = h('div', {class: 'lines'}, temple ? rangeRow() : null);
 		list.forEach((line, i) => box.append(temple ? spawnLine(line, i, list) : waveLine(line, i, list)));
 		return box;
@@ -617,7 +700,7 @@
 
 	function waveLine(line, i, list) {
 		const rule = RULES[line.kind] || RULES.table;
-		const tuneKey = `${S.mode}:${S.sel[S.mode]}:${line.mob}`;
+		const tuneKey = `${S.mode}:${S.sel[S.mode]}:${S.gate}:${line.mob}`;
 		const tuned = !!effectiveTune(line.mob);
 		const row = h('div', {class: `row ${S.flash === line.mob ? 'flash' : ''} ${S.swap === i ? 'swapping' : ''}`},
 			who(line, i),
@@ -673,14 +756,14 @@
 
 	// --- creatures' settings: this wave or cell over every one, as the game reads them ---
 
-	const tuneScope = () => (S.tuneScope === 'all' ? 0 : S.sel[S.mode]);
+	const tuneScope = () => (S.tuneScope === 'all' ? 0 : room() ? S.gate : S.sel[S.mode]);
 	const effectiveTune = mob => {
-		const tunes = doc().tunes;
+		const tunes = arena().tunes;
 		return tunes[S.sel[S.mode]]?.[mob] || tunes[0]?.[mob] || null;
 	};
 
 	function tunePanel(mob) {
-		const tunes = doc().tunes, scope = tuneScope();
+		const tunes = arena().tunes, scope = tuneScope();
 		const shown = tunes[scope]?.[mob] || (scope ? tunes[0]?.[mob] : null) || Model.tune();
 		const write = (key, value) => {
 			const own = (tunes[scope] ??= {});
@@ -700,7 +783,7 @@
 				h('option', {value: '', selected: !shown[key]}, 'His own'),
 				none ? h('option', {value: 'none', selected: shown[key] === 'none'}, 'None') : null,
 				options.map(g => h('option', {value: g.id, selected: g.id === shown[key]}, g.name))));
-		const word = S.mode === 'waves' ? 'wave' : 'cell';
+		const word = S.mode === 'waves' ? 'wave' : room() ? 'gate' : 'cell';
 		const own = tunes[scope]?.[mob];
 		return h('div', {class: 'tune'},
 			h('header', {}, seg([['this', `This ${word}`], ['all', `Every ${word}`]], S.tuneScope, v => { S.tuneScope = v; renderEditor(); }),
@@ -791,7 +874,10 @@
 		const count = list => list.forEach(l => seen.set(l.mob, (seen.get(l.mob) || 0) + 1));
 		if (S.mode === 'waves') Object.values(d.waves).forEach(count);
 		else if (S.mode === 'colosseum') Object.values(d.cells).forEach(count);
-		else d.spawns.forEach(sp => count(sp.entries));
+		else {
+			d.spawns.forEach(sp => count(sp.entries));
+			d.colosseums.forEach(r => Object.values(r.config.cells).forEach(count));
+		}
 		return [...seen.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([id]) => id);
 	}
 
@@ -1115,7 +1201,7 @@
 		if (e.key === '?') { showKeys(); return; }
 		if (e.key === '[') nextTarget(-1);
 		if (e.key === ']') nextTarget(1);
-		if (S.mode === 'colosseum' && /^[0-9]$/.test(e.key)) setGroup(+e.key);
+		if ((S.mode === 'colosseum' || room()) && /^[0-9]$/.test(e.key)) setGroup(+e.key);
 	});
 
 	let dragging = 0;

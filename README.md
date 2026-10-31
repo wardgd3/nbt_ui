@@ -20,7 +20,7 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 
 - **Waves:** only waves that differ from the game's table go in the file. On import the game plays every other wave as written, and it replaces any wave edits, wave Colosseums and mob settings the world already has.
 - **Colosseum:** the same tags the admin page exports. Castle stats from a file you opened are kept.
-- **Temple:** boss, lives, safe room rewards and every Mob Spawn by position. The world keeps the imported Spawns and puts them back if the Temple is rebuilt. Importing applies to that one world and replaces its boss, lives and rewards, with no backup made first. A Spawn the file does not name keeps what it has.
+- **Temple:** boss, lives, safe room rewards, every Mob Spawn by position, and the three colosseum rooms' gates and rounds. The world keeps the imported Spawns and rooms and puts them back if the Temple is rebuilt. Importing applies to that one world and replaces its boss, lives and rewards, with no backup made first. A Spawn the file does not name keeps what it has. A colosseum room with every gate empty plays its own mix.
 
 ## Keeping the data current
 
@@ -31,5 +31,7 @@ npm run gen
 ```
 
 It reads `FightArenaMod`, `DynamicDifficultyMod` and `ModernWarfareMod` from your home folder. Close the game first, so the Temple Design region files are not in use.
+
+The Temple's colosseum rooms are read from the same world, by their Colosseum Trap blocks.
 
 `npm test` checks the codec and round-trips your real Colosseum files.

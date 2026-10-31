@@ -198,6 +198,15 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .map circle:hover { stroke: var(--ink); }
 
 .room-head { padding: 9px 14px 3px; }
+.map .map-room { fill: var(--ember-soft); stroke: var(--ember); stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
+.colosseum-row { font-weight: 600; color: var(--ink); }
+.colosseum-row i { background: none; box-shadow: 0 0 0 2px var(--ember); width: 7px; height: 7px; }
+.ring .way { fill: none; stroke: var(--line); stroke-dasharray: 3 3; }
+.room-edit { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); }
+.room-side { min-height: 0; overflow-y: auto; border-right: 1px solid var(--line-soft); }
+.room-main { min-height: 0; display: flex; flex-direction: column; }
+.room-note { margin: 4px 14px 11px; color: var(--ink-3); font-size: 13px; }
+@media (max-width: 900px) { .room-edit { grid-template-columns: 1fr; overflow-y: auto; } .room-side { border-right: 0; overflow: visible; } }
 .spawn-row { width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 14px; border: 0; background: none; text-align: left; color: var(--ink-2); }
 .spawn-row:hover { background: var(--raised); }
 .spawn-row[aria-current="true"] { background: var(--raised-2); color: var(--ink); box-shadow: inset 3px 0 0 var(--ember); }

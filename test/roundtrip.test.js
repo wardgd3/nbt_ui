@@ -105,6 +105,30 @@ test('Temple file round trip keeps edits and every spawn', async () => {
 	assert.strictEqual(again.spawns.length, doc.spawns.length);
 });
 
+test('a Temple file carries each colosseum room, its gates and rounds, as the mod reads them', async () => {
+	const doc = Model.fresh.temple();
+	assert.deepStrictEqual(doc.colosseums.map(r => [r.level, r.shape]), [[1, 'classic'], [2, 'ring'], [3, 'column']]);
+	const room = doc.colosseums[1];
+	room.config.cells[1] = [Model.line('minecraft:zombie', 4)];
+	room.config.cells[4] = [Model.line('minecraft:husk', 2, 'exact')];
+	room.config.groups = 2;
+	room.config.cellGroups = {1: 1, 4: 2};
+	room.config.delay = 9;
+	room.config.reward = 500;
+	const stored = JSON.parse(JSON.stringify(doc));
+	const root = await NBT.parse(await Model.toFile(stored));
+	const one = root.ColosseumRooms.v.items[1];
+	assert.deepStrictEqual([one.X.v, one.Y.v, one.Z.v], [room.x, room.y, room.z]);
+	assert.deepStrictEqual(one.Colosseum.v.Cells.v.items.map(c => c.Cell.v), [1, 4]);
+	assert.strictEqual(one.Colosseum.v.CellGroups.v['4'].v, 2);
+	const again = Model.fromFile(root, 'temple');
+	assert.deepStrictEqual(again.colosseums[1].config.cells[4], room.config.cells[4]);
+	assert.strictEqual(again.colosseums[1].config.delay, 9);
+	assert.strictEqual(again.colosseums[1].config.reward, 500);
+	assert.deepStrictEqual(Object.keys(again.colosseums[1].config.cells), ['1', '2', '3', '4']);
+	assert.deepStrictEqual(again.colosseums[0].config.cells[1], []);
+});
+
 test('the wave table matches a real export where the game has one', () => {
 	const fresh = Model.fresh.waves();
 	assert.strictEqual(Object.keys(fresh.waves).length, 40);

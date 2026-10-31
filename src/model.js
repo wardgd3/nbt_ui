@@ -5,7 +5,7 @@ const Model = (() => {
 	const N = typeof NBT !== 'undefined' ? NBT : require('./nbt.js');
 
 	const LIMITS = {
-		lines: 64, count: 200, cells: 15,
+		lines: 64, count: 200, cells: 15, roomCells: 4,
 		delay: [1, 320], startDelay: [0, 320], raise: [1, 30], reward: [0, 1000000],
 		spawnRange: [2, 64], spawnCount: [1, 64],
 		bossScale: [0.5, 16], bossHealth: [20, 50000], lives: [1, 10], safeReward: [0, 50000],
@@ -80,8 +80,8 @@ const Model = (() => {
 
 	// --- Colosseum ---
 
-	const newColosseum = () => ({
-		kind: 'colosseum', cells: Object.fromEntries(Array.from({length: LIMITS.cells}, (_, i) => [i + 1, []])), groups: 0, cellGroups: {}, offGroups: [], delay: 5, startDelay: 10, raise: 10, reward: 0,
+	const newColosseum = (cells = LIMITS.cells) => ({
+		kind: 'colosseum', cells: Object.fromEntries(Array.from({length: cells}, (_, i) => [i + 1, []])), groups: 0, cellGroups: {}, offGroups: [], delay: 5, startDelay: 10, raise: 10, reward: 0,
 		shape: 'classic', stats: [...STATS], tunes: {},
 	});
 
@@ -172,10 +172,31 @@ const Model = (() => {
 
 	// --- Temple ---
 
+	/** A colosseum room: where its trap is, and its cells and rounds, tagged as a Colosseum's but for how few cells it has. */
+	const newRoom = room => ({...clone(room), config: {...newColosseum(LIMITS.roomCells), shape: room.shape}});
+
+	function readRoom(room, tags) {
+		const read = readColosseum(tags), config = newRoom(room).config;
+		for (let cell = 1; cell <= LIMITS.roomCells; cell++) config.cells[cell] = read.cells[cell];
+		config.groups = Math.min(read.groups, LIMITS.roomCells);
+		for (const [cell, group] of Object.entries(read.cellGroups)) if (+cell <= LIMITS.roomCells && group <= config.groups) config.cellGroups[cell] = group;
+		config.offGroups = read.offGroups.filter(g => g <= config.groups);
+		for (const key of ['delay', 'startDelay', 'raise', 'reward']) config[key] = read[key];
+		config.tunes = read.tunes;
+		return config;
+	}
+
 	const newTemple = () => ({
 		kind: 'temple', ...clone(TEMPLE_DEFAULTS),
 		spawns: clone(D.spawns).map(s => ({...s, entries: s.entries.map(e => ({mob: e.mob, count: e.count}))})),
+		colosseums: (D.colosseums || []).map(newRoom),
 	});
+
+	/** A Temple document saved before the colosseum rooms: given them, empty. */
+	function upgrade(doc) {
+		doc.colosseums ??= (D.colosseums || []).map(newRoom);
+		return doc;
+	}
 
 	function readTemple(c) {
 		const doc = newTemple();
@@ -196,6 +217,10 @@ const Model = (() => {
 			spawn.range = clamp(get(one, 'Range', spawn.range), LIMITS.spawnRange);
 			spawn.entries = items(one, 'Entries').map(e => ({mob: get(e, 'Mob', ''), count: clamp(get(e, 'Count', 1), LIMITS.spawnCount)}));
 		}
+		for (const one of items(c, 'ColosseumRooms')) {
+			const room = doc.colosseums.find(r => r.x === get(one, 'X', 0) && r.y === get(one, 'Y', 0) && r.z === get(one, 'Z', 0));
+			if (room) room.config = readRoom(room, get(one, 'Colosseum', {}));
+		}
 		return doc;
 	}
 
@@ -210,6 +235,9 @@ const Model = (() => {
 		Spawns: N.list(doc.spawns.map(s => ({
 			X: N.int(s.x), Y: N.int(s.y), Z: N.int(s.z), Range: N.int(s.range),
 			Entries: N.list(s.entries.map(e => ({Mob: N.string(e.mob), Count: N.int(e.count)}))),
+		}))),
+		ColosseumRooms: N.list(doc.colosseums.map(r => ({
+			X: N.int(r.x), Y: N.int(r.y), Z: N.int(r.z), Colosseum: N.compound(colosseumTags(r.config)),
 		}))),
 	});
 
@@ -252,12 +280,13 @@ const Model = (() => {
 			}
 			return out;
 		}
-		return doc.spawns.flatMap(s => lineIssues(s.entries.map(e => line(e.mob, e.count)), `Spawn ${s.x}, ${s.y}, ${s.z}`));
+		return [...doc.spawns.flatMap(s => lineIssues(s.entries.map(e => line(e.mob, e.count)), `Spawn ${s.x}, ${s.y}, ${s.z}`)),
+			...doc.colosseums.flatMap(r => Object.keys(r.config.cells).flatMap(c => lineIssues(r.config.cells[c], `Level ${r.level} colosseum gate ${c}`)))];
 	}
 
 	return {
 		LIMITS, SHAPES, FOLDERS, RULES, ARMED, clone, clamp, round2, line, tune, isDefaultTune, fresh, kindOf, fromFile, toFile,
-		isWritten, sameLines, issues, readColosseum, writers,
+		isWritten, sameLines, issues, readColosseum, writers, upgrade,
 	};
 })();
 if (typeof module !== 'undefined') module.exports = Model;
