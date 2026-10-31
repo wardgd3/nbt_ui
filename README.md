@@ -16,6 +16,10 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 
 `orc 5`, `5 orc`, `orc x5` and `orc*5` all mean five orcs. Press `?` in the app for every key.
 
+## Map
+
+The Map tab shows Levels 1 to 3 of the Temple from above, with the roof off, in the order players walk them. Scroll to zoom, drag to move, and click a room for its details. A Mob Spawn in the details, or a colosseum's Edit button, opens it in the Temple tab. The Mob Spawns and their mobs come from the Temple file you are working on.
+
 ## Cloud
 
 Click **Cloud** and sign in with Google, using `npm start` (sign-in cannot come back to a page opened from disk). Save then also copies the file to the cloud, and Cloud lists, opens and deletes your files of the current kind. The game still reads files from its own folders, so a file opened from the cloud needs a Save to reach the game.
@@ -36,7 +40,7 @@ Files are in the `fa_files` table of the D&D DB Supabase project, one row per ki
 npm run gen
 ```
 
-It reads `FightArenaMod`, `DynamicDifficultyMod` and `ModernWarfareMod` from your home folder. Close the game first, so the Temple Design region files are not in use.
+It reads `FightArenaMod`, `DynamicDifficultyMod` and `ModernWarfareMod` from your home folder, and redraws the Map from the blocks in the Temple Design world and the newest `docs/temple/layout_v*.txt`. Close the game first, so the Temple Design region files are not in use.
 
 The Temple's colosseum rooms are read from the same world, by their Colosseum Trap blocks.
 

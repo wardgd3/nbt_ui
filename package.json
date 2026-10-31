@@ -5,7 +5,7 @@
   "description": "Fight Arena NBT builder: waves, Colosseum and Temple files",
   "scripts": {
     "start": "node tools/serve.js",
-    "gen": "node tools/gen-data.js",
+    "gen": "node tools/gen-data.js && node tools/gen-map.js",
     "test": "node --test"
   }
 }

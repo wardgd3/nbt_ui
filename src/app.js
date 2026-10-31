@@ -7,7 +7,7 @@
 	const FACTION_NAMES = {undead: 'Undead', orcs: 'Orcs', beasts: 'Beasts', dark: 'Dark Order', giants: 'Giants', demons: 'Demons', dragons: 'Dragons',
 		insurgents: 'Insurgents', light: 'Light side', vanilla: 'Vanilla'};
 	const GROUP_COLORS = ['#f0813a', '#58b0d1', '#8dbb6f', '#a585e0', '#e9b44c', '#e26aa2', '#4fc1a6', '#d17f4e', '#7f9be8', '#c9c262', '#e8604f', '#8d97a3', '#b6946c', '#c58be0', '#68c4e0'];
-	const MODES = [['waves', 'Waves'], ['colosseum', 'Colosseum'], ['temple', 'Temple']];
+	const MODES = [['waves', 'Waves'], ['colosseum', 'Colosseum'], ['temple', 'Temple'], ['map', 'Map']];
 	const LEVELS = [[1, 'Level 1'], [2, 'Level 2'], [3, 'Level 3'], [0, 'Tunnels']];
 	/** The colosseum rooms' names; which of a room's six gates each of its four cells is, round from the way in. */
 	const ROOM_NAMES = {classic: 'Standard', ring: 'Ring', column: 'Cylinder'};
@@ -33,6 +33,11 @@
 		clip: null,
 		folder: null,
 		folderLive: false,
+		map: false,
+		mapLevel: 1,
+		mapRoom: null,
+		mapView: null,
+		mapShow: {route: true, mobs: true, chests: true, names: true},
 	};
 	const last = {}, saved = {}, undo = {waves: [], colosseum: [], temple: []}, redo = {waves: [], colosseum: [], temple: []};
 
@@ -137,7 +142,6 @@
 
 	const mobName = id => MOBS.get(id)?.name || id.replace(/^.*:/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'No creature';
 	const factionColor = id => `var(--f-${MOBS.get(id)?.faction || 'other'})`;
-	const heavy = id => ['giants', 'demons', 'dragons'].includes(MOBS.get(id)?.faction);
 
 	function lines() {
 		const d = doc(), at = S.sel[S.mode];
@@ -244,7 +248,7 @@
 		else if (temple) list.push({mob: id, count: Math.min(maxCount(), count)});
 		else {
 			if (list.length >= LIMITS.lines) return toast(`A line-up holds at most ${LIMITS.lines} lines`, 'bad');
-			list.push(Model.line(id, Math.min(maxCount(), count), heavy(id) ? 'exact' : 'table'));
+			list.push(Model.line(id, Math.min(maxCount(), count), 'exact'));
 		}
 		S.flash = id;
 		hard();
@@ -284,7 +288,7 @@
 		if (!list || !S.clip) return;
 		const temple = plainList();
 		const incoming = S.clip.lines.map(l => (temple ? {mob: l.mob, count: Math.min(maxCount(), l.count)}
-			: S.clip.temple ? Model.line(l.mob, l.count, heavy(l.mob) ? 'exact' : 'table') : Model.clone(l)));
+			: S.clip.temple ? Model.line(l.mob, l.count, 'exact') : Model.clone(l)));
 		list.splice(0, list.length, ...incoming);
 		hard();
 	}
@@ -304,23 +308,24 @@
 				saveDraft();
 			}});
 		const top = document.getElementById('top');
-		keepFocus(top, () => top.replaceChildren(
+		keepFocus(top, () => top.replaceChildren(...[
 			h('div', {class: 'brand'}, h('i', {}, 'F'), 'NBT Builder'),
-			seg(MODES, S.mode, setMode, 'big'),
-			h('label', {class: 'file', title: dirty(S.mode) ? 'Unsaved changes' : 'Saved'}, dirty(S.mode) ? h('b') : null, name, h('span', {}, '.nbt')),
-			h('div', {class: 'bar'},
+			seg(MODES, S.map ? 'map' : S.mode, setMode, 'big'),
+			S.map ? null : h('label', {class: 'file', title: dirty(S.mode) ? 'Unsaved changes' : 'Saved'}, dirty(S.mode) ? h('b') : null, name, h('span', {}, '.nbt')),
+			S.map ? null : h('div', {class: 'bar'},
 				btn('undo', 'Undo', () => travel(undo, redo, 'undo'), {class: 'icon ghost', disabled: !undo[S.mode].length, title: 'Undo (Ctrl+Z)'}),
 				btn('redo', 'Redo', () => travel(redo, undo, 'redo'), {class: 'icon ghost', disabled: !redo[S.mode].length, title: 'Redo (Ctrl+Y)'}),
 				btn('reset', 'New', newDoc, {text: 'New', title: 'Start a new file of this kind'}),
 				btn('open', 'Open', openFile, {text: 'Open', title: 'Open a file (Ctrl+O)'}),
 				btn('cloud', 'Cloud', cloudDialog, {text: 'Cloud', title: Cloud.user() ? `Cloud files for ${Cloud.user()}` : 'Sign in to keep files in the cloud'}),
 				btn('save', 'Save', saveFile, {class: 'primary', text: 'Save', title: 'Save (Ctrl+S)'})),
-		));
+		].filter(Boolean)));
 	}
 
 	function setMode(mode) {
 		commit();
-		S.mode = mode;
+		S.map = mode === 'map';
+		S.mode = S.map ? 'temple' : mode;
 		S.swap = null;
 		S.tuneOpen = null;
 		saveDraft();
@@ -331,6 +336,7 @@
 
 	function renderRail() {
 		const rail = document.getElementById('rail');
+		if (S.map) return rail.replaceChildren(...railMap());
 		const scroller = rail.querySelector('.scroll');
 		const top = scroller ? scroller.scrollTop : 0;
 		keepFocus(rail, () => rail.replaceChildren(...{waves: railWaves, colosseum: railColosseum, temple: railTemple}[S.mode]()));
@@ -547,6 +553,242 @@
 		];
 	}
 
+	// --- map ---
+
+	const MAP_SORTS = {start: ['Way in', 'var(--ink-2)'], room: ['Room', 'var(--f-vanilla)'], fight: ['Combat', 'var(--bad)'], parkour: ['Parkour', 'var(--ember)'], puzzle: ['Golem puzzle', 'var(--f-dark)'],
+		colosseum: ['Colosseum', 'var(--warn)'], safe: ['Safe room', 'var(--good)'], stairs: ['Stairs', 'var(--f-insurgents)']};
+	const MAP_TAGS = {gated: 'Breach gate on the way in', chest: 'Reward chest', trap: 'Trap room', bridge: 'Crossed on a bridge over the Great Hall'};
+	const MAP_KEY = [['#6e6256', 'Floor, lighter is higher'], ['#3a312a', 'Wall'], ['#e8682a', 'Lava'], ['#3f86c4', 'Water'], ['hatch', 'Open drop'], ['#7fbf7a', 'Door'], ['#e8604f', 'Breach gate'], ['#8a6c4c', 'Furnishings'], ['#5e8a4e', 'Plants']];
+	const MAP_MIN = 0.5, MAP_MAX = 14;
+
+	const mapLevel = () => MAPDATA.levels[S.mapLevel];
+	const inBox = (b, x, z) => x >= b[0] && x <= b[2] && z >= b[1] && z <= b[3];
+
+	/** The Mob Spawns standing in a room, with their place in the Temple's list. */
+	function roomSpawns(r) {
+		return doc().spawns.map((sp, i) => ({sp, i})).filter(({sp}) => sp.level === S.mapLevel && inBox(r.box, sp.x, sp.z));
+	}
+
+	const roomMobs = r => (r.colosseum ? Object.values(doc().colosseums.find(c => c.level === r.colosseum).config.cells).reduce((n, list) => n + headcount(list), 0)
+		: roomSpawns(r).reduce((n, {sp}) => n + sp.entries.reduce((m, e) => m + e.count, 0), 0));
+
+	function setMapLevel(level) {
+		S.mapLevel = level;
+		S.mapRoom = null;
+		render();
+		fitMap();
+	}
+
+	function pickMapRoom(k, focus) {
+		S.mapRoom = k;
+		renderRail();
+		renderPalette();
+		drawMap();
+		if (focus) focusMap(mapLevel().rooms[k].box);
+	}
+
+	function editInTemple(key) {
+		commit();
+		S.map = false;
+		S.mode = 'temple';
+		S.level = S.mapLevel;
+		S.sel.temple = key;
+		S.swap = null;
+		render();
+	}
+
+	function mapKeys(e) {
+		if (['1', '2', '3'].includes(e.key)) setMapLevel(+e.key);
+		else if (e.key === '0') fitMap();
+		else if (e.key === '+' || e.key === '=') zoomMap(1.4);
+		else if (e.key === '-') zoomMap(1 / 1.4);
+		else if (e.key === 'Escape') pickMapRoom(null);
+		else if (e.key === '?') showKeys();
+	}
+
+	const roomBadge = (k, r) => h('b', {class: 'map-badge', style: `--c:${MAP_SORTS[r.sort][1]}`}, String(k + 1));
+
+	function railMap() {
+		const rows = mapLevel().rooms.map((r, k) => {
+			const mobs = roomMobs(r);
+			return h('button', {type: 'button', class: 'map-row', 'aria-current': String(S.mapRoom === k), onclick: () => pickMapRoom(k, true)},
+				roomBadge(k, r), h('span', {}, r.name), h('small', {}, mobs ? `${mobs} mobs` : ''));
+		});
+		return [
+			h('div', {class: 'pad'}, h('div', {class: 'eyebrow', style: 'margin-bottom:7px'}, 'Temple map'), seg(LEVELS.slice(0, 3), S.mapLevel, setMapLevel)),
+			h('div', {class: 'room-head eyebrow'}, 'Rooms in order'),
+			h('div', {class: 'scroll'}, rows),
+		];
+	}
+
+	function renderMap(editor) {
+		const level = mapLevel(), img = h('img', {src: `src/map/level${S.mapLevel}.png`, alt: `Level ${S.mapLevel} of the Temple from above`, draggable: 'false', style: `width:${level.w}px;height:${level.h}px`});
+		const stage = h('div', {class: 'map-stage'}, img, s('svg', {class: 'map-over', viewBox: `${level.x0} ${level.z0} ${level.w} ${level.h}`, width: level.w, height: level.h}));
+		const wrap = h('div', {class: 'map-wrap', tabindex: '0', 'aria-label': `Map of level ${S.mapLevel}`}, stage,
+			h('div', {class: 'map-tools'},
+				btn('plus', 'Zoom in', () => zoomMap(1.4), {class: 'small icon'}),
+				h('button', {type: 'button', class: 'btn small icon', title: 'Zoom out', 'aria-label': 'Zoom out', onclick: () => zoomMap(1 / 1.4)}, '−'),
+				btn('reset', 'Fit the level', fitMap, {class: 'small icon'})),
+			h('div', {class: 'map-north', 'aria-hidden': 'true'}, s('svg', {viewBox: '0 0 24 32', width: 24, height: 32}, s('path', {d: 'M12 11 6 27l6-4 6 4z', fill: 'currentColor'}), s('text', {x: 12, y: 9, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700, fill: 'currentColor'}, 'N'))),
+			h('div', {class: 'map-scale'}, h('i'), h('span')));
+		const rooms = level.rooms.length, mobs = doc().spawns.filter(sp => sp.level === S.mapLevel).length;
+		editor.replaceChildren(h('div', {class: 'ed-head'}, h('div', {}, h('h1', {}, `Level ${S.mapLevel}`),
+			h('div', {class: 'sub'}, `${rooms} rooms · ${mobs} Mob Spawns · floors at Y ${Math.min(...level.rooms.map(r => r.floor))} to ${Math.max(...level.rooms.map(r => r.floor))} · Temple v${MAPDATA.version}`))), wrap);
+		wireMap(wrap);
+		drawMap();
+		placeMap();
+		if (!S.mapView || S.mapView.level !== S.mapLevel) fitMap();
+	}
+
+	/** Inside these the sizes are the screen's, whatever the zoom. */
+	const pin = (x, z, ...kids) => s('g', {transform: `translate(${x} ${z})`}, s('g', {class: 'pin'}, ...kids));
+
+	function drawMap() {
+		const over = document.querySelector('.map-over');
+		if (!over) return;
+		const level = mapLevel(), show = S.mapShow, parts = [];
+		level.rooms.forEach((r, k) => {
+			parts.push(s('rect', {class: `map-box${S.mapRoom === k ? ' on' : ''}`, x: r.box[0], y: r.box[1], width: r.box[2] - r.box[0], height: r.box[3] - r.box[1], rx: r.colosseum ? 86 : 0, onclick: () => pickMapRoom(k)},
+				s('title', {}, r.name)));
+		});
+		if (show.route) {
+			for (const line of level.route) {
+				const points = line.map(p => p.join(',')).join(' ');
+				parts.push(s('polyline', {class: 'map-case', points}), s('polyline', {class: 'map-way', points}));
+				const [a, b] = line[Math.floor((line.length - 1) / 2)] === line[line.length - 1] ? [line[0], line[1]] : [line[Math.floor((line.length - 1) / 2)], line[Math.floor((line.length - 1) / 2) + 1]];
+				const turn = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI;
+				parts.push(pin((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, s('path', {class: 'map-arrow', d: 'M-5-5 6 0-5 5-2 0z', transform: `rotate(${turn})`})));
+			}
+			for (const [a, b] of level.locked) parts.push(s('line', {class: 'map-locked', x1: a[0], y1: a[1], x2: b[0], y2: b[1]}, s('title', {}, 'Walled up until the golem is mended')));
+		}
+		if (show.chests) for (const [x, z] of level.chests) parts.push(pin(x + 0.5, z + 0.5, s('rect', {class: 'map-chest', x: -3, y: -3, width: 6, height: 6}, s('title', {}, 'Chest'))));
+		if (show.mobs) {
+			doc().spawns.forEach((sp, i) => {
+				if (sp.level !== S.mapLevel) return;
+				const home = level.rooms.findIndex(r => inBox(r.box, sp.x, sp.z));
+				parts.push(pin(sp.x + 0.5, sp.z + 0.5, s('circle', {class: 'map-spawn', r: 6, fill: sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)', onclick: () => (home >= 0 ? pickMapRoom(home) : editInTemple(i))},
+					s('title', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty'))));
+			});
+		}
+		level.rooms.forEach((r, k) => {
+			const on = S.mapRoom === k, kids = [s('circle', {class: 'map-num', r: 11, style: `--c:${MAP_SORTS[r.sort][1]}`, onclick: () => pickMapRoom(k)}, s('title', {}, r.name)),
+				s('text', {class: 'map-numt', y: 4}, String(k + 1))];
+			if (show.names || on) kids.push(s('text', {class: `map-name${on ? ' on' : ''}`, y: 25}, r.name));
+			parts.push(pin(r.at[0], r.at[1], ...kids));
+		});
+		over.replaceChildren(...parts);
+	}
+
+	function mapBounds() {
+		const wrap = document.querySelector('.map-wrap');
+		return wrap ? [wrap.clientWidth, wrap.clientHeight] : null;
+	}
+
+	function placeMap() {
+		const stage = document.querySelector('.map-stage'), v = S.mapView;
+		if (!stage || !v) return;
+		stage.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.k})`;
+		stage.style.setProperty('--u', 1 / v.k);
+		stage.classList.toggle('sharp', v.k >= 4);
+		const nice = [10, 25, 50, 100, 200].find(n => n * v.k >= 80) || 200;
+		const scale = document.querySelector('.map-scale');
+		scale.firstChild.style.width = `${nice * v.k}px`;
+		scale.lastChild.textContent = `${nice} blocks`;
+	}
+
+	function fitMap() {
+		const size = mapBounds();
+		if (!size) return;
+		const level = mapLevel(), pad = 16, k = Math.min((size[0] - pad * 2) / level.w, (size[1] - pad * 2) / level.h);
+		S.mapView = {level: S.mapLevel, k, x: (size[0] - level.w * k) / 2, y: (size[1] - level.h * k) / 2};
+		placeMap();
+	}
+
+	function focusMap(box) {
+		const size = mapBounds();
+		if (!size) return;
+		const level = mapLevel(), w = box[2] - box[0], d = box[3] - box[1];
+		const k = Math.max(MAP_MIN, Math.min(MAP_MAX, Math.min(size[0] / (w * 1.8), size[1] / (d * 1.8))));
+		S.mapView = {level: S.mapLevel, k, x: size[0] / 2 - ((box[0] + box[2]) / 2 - level.x0) * k, y: size[1] / 2 - ((box[1] + box[3]) / 2 - level.z0) * k};
+		placeMap();
+	}
+
+	function zoomMap(by, cx, cy) {
+		const size = mapBounds(), v = S.mapView;
+		if (!size || !v) return;
+		const k = Math.max(MAP_MIN, Math.min(MAP_MAX, v.k * by)), px = cx ?? size[0] / 2, py = cy ?? size[1] / 2;
+		v.x = px - (px - v.x) * k / v.k;
+		v.y = py - (py - v.y) * k / v.k;
+		v.k = k;
+		placeMap();
+	}
+
+	function wireMap(wrap) {
+		let held = null;
+		wrap.addEventListener('wheel', e => {
+			e.preventDefault();
+			const box = wrap.getBoundingClientRect();
+			zoomMap(Math.exp(-e.deltaY * 0.0016), e.clientX - box.left, e.clientY - box.top);
+		}, {passive: false});
+		wrap.addEventListener('pointerdown', e => {
+			if (e.button !== 0 || e.target.closest('button')) return;
+			held = {x: e.clientX, y: e.clientY, vx: S.mapView.x, vy: S.mapView.y, moved: false, id: e.pointerId};
+		});
+		wrap.addEventListener('pointermove', e => {
+			if (!held) return;
+			const dx = e.clientX - held.x, dy = e.clientY - held.y;
+			if (!held.moved && Math.hypot(dx, dy) < 4) return;
+			if (!held.moved) wrap.setPointerCapture(held.id);
+			held.moved = true;
+			wrap.classList.add('held');
+			S.mapView.x = held.vx + dx;
+			S.mapView.y = held.vy + dy;
+			placeMap();
+		});
+		const drop = () => {
+			held = null;
+			wrap.classList.remove('held');
+		};
+		wrap.addEventListener('pointerup', drop);
+		wrap.addEventListener('pointercancel', drop);
+		wrap.addEventListener('dblclick', e => {
+			const box = wrap.getBoundingClientRect();
+			zoomMap(1.8, e.clientX - box.left, e.clientY - box.top);
+		});
+	}
+
+	function mapSide() {
+		const toggle = (key, label) => h('label', {class: 'map-toggle'}, h('input', {type: 'checkbox', checked: S.mapShow[key], onchange: e => {
+			S.mapShow[key] = e.target.checked;
+			drawMap();
+		}}), label);
+		return [
+			h('div', {class: 'scroll map-side'}, mapRoomCard(),
+				h('div', {class: 'eyebrow'}, 'Show'),
+				h('div', {class: 'map-toggles'}, toggle('route', 'Route'), toggle('mobs', 'Mob Spawns'), toggle('chests', 'Chests'), toggle('names', 'Room names')),
+				h('div', {class: 'eyebrow'}, 'Rooms'),
+				h('div', {class: 'map-key'}, Object.values(MAP_SORTS).map(([label, color]) => h('span', {}, h('b', {class: 'map-badge', style: `--c:${color}`}), label))),
+				h('div', {class: 'eyebrow'}, 'Key'),
+				h('div', {class: 'map-key'}, MAP_KEY.map(([color, label]) => h('span', {}, h('i', {class: color === 'hatch' ? 'hatch' : null, style: color === 'hatch' ? null : `background:${color}`}), label)),
+					h('span', {}, h('i', {class: 'way'}), 'Route, in order'), h('span', {}, h('i', {class: 'dot'}), 'Mob Spawn, by faction'), h('span', {}, h('i', {class: 'box'}), 'Chest'))),
+		];
+	}
+
+	function mapRoomCard() {
+		const r = mapLevel().rooms[S.mapRoom];
+		if (!r) return h('div', {class: 'map-card'}, h('h2', {}, 'Pick a room'), h('p', {}, 'Click a room on the map or in the list to see what is in it.'));
+		const spawns = roomSpawns(r);
+		const up = r.sort === 'stairs' ? (S.mapLevel < 3 ? S.mapLevel + 1 : 0) : null;
+		return h('div', {class: 'map-card'},
+			h('div', {class: 'map-card-head'}, roomBadge(S.mapRoom, r), h('h2', {}, r.name)),
+			h('p', {}, `${MAP_SORTS[r.sort][0]} · floor Y ${r.floor} · ${r.height} high · ${r.box[2] - r.box[0]} by ${r.box[3] - r.box[1]}`),
+			r.tags.map(t => h('p', {class: 'map-tag'}, MAP_TAGS[t] || t)),
+			r.colosseum ? h('button', {type: 'button', class: 'btn small primary', onclick: () => editInTemple(`room${r.colosseum}`)}, 'Edit gates and rounds') : null,
+			up ? h('button', {type: 'button', class: 'btn small', onclick: () => setMapLevel(up)}, `Up to Level ${up}`) : up === 0 ? h('p', {class: 'map-tag'}, 'Up to the roof') : null,
+			spawns.length ? h('div', {class: 'map-spawns'}, spawns.map(({sp, i}) => h('button', {type: 'button', class: 'spawn-row', style: `--c:${sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)'}`, title: 'Edit in the Temple tab', onclick: () => editInTemple(i)},
+				h('i'), h('span', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty'), h('small', {}, `r${sp.range}`)))) : null);
+	}
+
 	// --- editor ---
 
 	function title() {
@@ -594,6 +836,7 @@
 
 	function renderEditor() {
 		const editor = document.getElementById('editor');
+		if (S.map) return renderMap(editor);
 		const scroller = editor.querySelector('.scroll');
 		const top = scroller ? scroller.scrollTop : 0;
 		keepFocus(editor, () => {
@@ -845,7 +1088,7 @@
 
 	// --- palette ---
 
-	const searchBox = () => document.querySelector('#palette input');
+	const searchBox = () => document.querySelector('#palette .search input');
 
 	/** "orc 5", "5 orc", "orc x5" and "orc*5" all mean five orcs. */
 	function parseQuery(text) {
@@ -885,6 +1128,7 @@
 
 	function renderPalette() {
 		const root = document.getElementById('palette');
+		if (S.map) return root.replaceChildren(...mapSide());
 		const previous = searchBox();
 		if (!previous) {
 			root.replaceChildren(
@@ -959,6 +1203,9 @@
 	// --- footer ---
 
 	function renderFoot() {
+		if (S.map) return document.getElementById('foot').replaceChildren(h('div', {class: 'hints'},
+			h('span', {}, 'Scroll to zoom'), h('span', {}, 'Drag to move'), h('span', {}, 'Click a room for its details'),
+			h('span', {}, h('kbd', {}, '1'), '-', h('kbd', {}, '3'), ' level'), h('span', {}, h('kbd', {}, '0'), ' fit')));
 		const found = Model.issues(doc());
 		const linked = S.folder && S.folderLive;
 		document.getElementById('foot').replaceChildren(
@@ -976,7 +1223,7 @@
 
 	function showKeys() {
 		const rows = [['/', 'Find a mob. "orc 5" adds five with Enter'], ['Enter', 'From a count, back to the mob search'], ['↑ ↓', 'In a count, up or down one (Shift for five)'],
-			['[ ]', 'Previous or next wave, cell or spawn'], ['Alt 1-3', 'Waves, Colosseum, Temple'], ['0-9', 'Colosseum: put this cell in a group'],
+			['[ ]', 'Previous or next wave, cell or spawn'], ['Alt 1-4', 'Waves, Colosseum, Temple, Map'], ['0-9', 'Colosseum: put this cell in a group'],
 			['Ctrl C / V', 'Copy or paste a whole line-up'], ['Ctrl Z / Y', 'Undo or redo'], ['Ctrl S / O', 'Save or open']];
 		ask('Keyboard', h('div', {class: 'keys'}, rows.flatMap(([k, t]) => [h('kbd', {}, k), h('span', {}, t)])));
 	}
@@ -1117,6 +1364,7 @@
 	/** A whole document taken in. `opened` is the file on disk it came from, if any. */
 	function adopt(kind, read, name, opened) {
 		commit();
+		S.map = false;
 		S.mode = kind;
 		S.docs[kind] = read;
 		S.names[kind] = name;
@@ -1249,12 +1497,13 @@
 	document.addEventListener('keydown', e => {
 		if (document.querySelector('.veil')) return;
 		const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+		if (S.map && !e.altKey) return mapKeys(e);
 		if (ctrl && key === 's') { e.preventDefault(); saveFile(); return; }
 		if (ctrl && key === 'o') { e.preventDefault(); openFile(); return; }
 		if (ctrl && key === 'k') { e.preventDefault(); searchBox()?.focus(); return; }
 		if (ctrl && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); travel(redo, undo, 'redo'); return; }
 		if (ctrl && key === 'z') { e.preventDefault(); travel(undo, redo, 'undo'); return; }
-		if (e.altKey && ['1', '2', '3'].includes(e.key)) { e.preventDefault(); setMode(MODES[+e.key - 1][0]); return; }
+		if (e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); setMode(MODES[+e.key - 1][0]); return; }
 		if (typing(e.target)) return;
 		if (ctrl && key === 'c' && !String(window.getSelection())) { copyLines(); return; }
 		if (ctrl && key === 'v') { pasteLines(); return; }
