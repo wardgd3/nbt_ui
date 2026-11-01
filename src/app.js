@@ -1316,13 +1316,13 @@
 	}
 
 	/**
-	 * The Save dialog, opened on a mode's folder in the game, for the user to name the file there, and the file written where
-	 * they say. Its handle back, or null if they cancelled. A browser only knows a folder it has been given, so the first time
-	 * it asks for the game folder. No picker id: a remembered folder would win over the one asked for here.
+	 * The Save dialog, for the user to name the file, and the file written where they say. Its handle back. With the game folder
+	 * linked it opens on the mode's folder. Without a link it opens where that mode last saved: a picker id remembers the folder,
+	 * and would win over startIn, so the two are never passed together.
 	 */
 	async function saveDialog(mode, name, bytes, what, create) {
-		const startIn = await folderFor(mode, create);
-		const handle = await window.showSaveFilePicker({startIn, suggestedName: name, excludeAcceptAllOption: true, types: [{description: what, accept: {'application/octet-stream': ['.nbt']}}]});
+		const start = S.folder && S.folderLive ? {startIn: await folderFor(mode, create)} : {id: `fa_${mode}`};
+		const handle = await window.showSaveFilePicker({...start, suggestedName: name, excludeAcceptAllOption: true, types: [{description: what, accept: {'application/octet-stream': ['.nbt']}}]});
 		const out = await handle.createWritable();
 		await out.write(await bytes());
 		await out.close();
@@ -1336,7 +1336,6 @@
 		S.names[mode] = name.slice(0, -4);
 		try {
 			if ('showSaveFilePicker' in window) {
-				if (!await linkGameFolder()) return toast(`Not saved. Pick the Fight Arena folder to save into ${FOLDERS[mode]}.`, 'bad');
 				const handle = await saveDialog(mode, name, () => Model.toFile(S.docs[mode]), 'NBT file', true);
 				name = handle.name;
 				S.names[mode] = cleanName(name);
@@ -1353,9 +1352,7 @@
 			renderTop();
 			if (Cloud.user()) await saveToCloud(mode, name);
 		} catch (e) {
-			// Linking just now used up the click the Save dialog needs.
-			if (e.name === 'SecurityError') toast('Folder linked. Click Save again.', 'good');
-			else if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
+			if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
 		}
 	}
 
@@ -1416,14 +1413,11 @@
 		commit();
 		const r = room();
 		if (!('showSaveFilePicker' in window)) return toast(`This browser cannot save into ${FOLDERS.test}. Use Chrome or Edge.`, 'bad');
-		if (!await linkGameFolder()) return toast(`Not saved. Pick the Fight Arena folder to save into ${FOLDERS.test}.`, 'bad');
 		try {
 			const handle = await saveDialog('test', `colosseum_${ROOM_NAMES[r.shape].toLowerCase()}.nbt`, () => Model.testFile(r), 'Colosseum test', false);
 			toast(`Saved ${handle.name}. In the game: Admin, Temple, Import test.`, 'good');
 		} catch (e) {
-			// Linking just now used up the click the Save dialog needs.
-			if (e.name === 'SecurityError') toast('Folder linked. Click Save test again.', 'good');
-			else if (e.name === 'NotFoundError') toast(`Not saved. ${S.folder.name} has no ${FOLDERS.test} folder: link the Fight Arena folder.`, 'bad');
+			if (e.name === 'NotFoundError') toast(`Not saved. ${S.folder.name} has no ${FOLDERS.test} folder: link the Fight Arena folder.`, 'bad');
 			else if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
 		}
 	}

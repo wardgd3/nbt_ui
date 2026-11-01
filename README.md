@@ -10,7 +10,7 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 
 ## Fast use
 
-1. Click **Link game folder** at the bottom left and pick the Fight Arena instance folder. This works in Chrome and Edge. Save then writes straight into the right game folder, and Open lists what is there. Without it, files go wherever the browser saves them.
+1. Save opens the Windows Save dialog, where you pick the folder and name the file. Each kind of file reopens where it last saved. To have Open list a game folder, click **Link game folder** at the bottom left and pick the Fight Arena instance folder itself (Chrome and Edge only). With that link, Save opens on the right game folder.
 2. Press `/`, type `orc 5`, press Enter. Keep typing the next mob.
 3. Press `]` for the next wave or cell, and `Ctrl+S` to save. Your work is kept as a draft if you close the page.
 
