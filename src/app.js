@@ -1256,6 +1256,8 @@
 	const cleanName = name => (name.trim().replace(/\.nbt$/i, '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)) || S.mode;
 
 	async function folderFor(mode, create) {
+		// The test folder itself may be what was linked.
+		if (mode === 'test' && S.folder.name === FOLDERS.test) return S.folder;
 		return S.folder.getDirectoryHandle(FOLDERS[mode], {create});
 	}
 
@@ -1298,7 +1300,8 @@
 			await storeHandle(handle);
 			const names = [];
 			for await (const [name] of handle.entries()) names.push(name);
-			if (!names.includes('colosseum') && !names.includes('wave saves')) toast('That folder has no colosseum or wave saves folder. It should be the Fight Arena instance folder.', 'bad');
+			if (handle.name === FOLDERS.test) toast(`Linked ${handle.name}`, 'good');
+			else if (!names.includes('colosseum') && !names.includes('wave saves')) toast('That folder has no colosseum or wave saves folder. It should be the Fight Arena instance folder.', 'bad');
 			else toast(`Linked ${handle.name}`, 'good');
 			renderFoot();
 		} catch (e) {
@@ -1401,31 +1404,37 @@
 		render();
 	}
 
-	/** This colosseum alone, to the game's test folder: the admin page's Start test plays the newest there. */
+	/** The game folder linked and allowed, asking for it if not: the test folder is no use reached any other way. Done first, while the click still counts. */
+	async function linkTestFolder() {
+		if (!S.folder || !S.folderLive) await linkFolder();
+		return S.folder && S.folderLive;
+	}
+
+	/**
+	 * This colosseum alone, to the game's test folder: the admin page's Start test plays the newest there. Without the folder
+	 * it is not saved at all - a copy in Downloads is one Start test would never find.
+	 */
 	async function saveTest() {
 		commit();
 		const r = room(), name = `colosseum_${ROOM_NAMES[r.shape].toLowerCase()}.nbt`;
+		if (!hasFolderApi()) return toast(`This browser cannot save into ${FOLDERS.test}. Use Chrome or Edge.`, 'bad');
+		if (!await linkTestFolder()) return toast(`Not saved. Pick the Fight Arena folder to save into ${FOLDERS.test}.`, 'bad');
 		try {
+			const dir = await folderFor('test', false);
 			const bytes = await Model.testFile(r);
-			if (await ensureFolder()) {
-				const dir = await folderFor('test', true);
-				const out = await (await dir.getFileHandle(name, {create: true})).createWritable();
-				await out.write(bytes);
-				await out.close();
-				toast(`Saved ${FOLDERS.test}/${name}`, 'good');
-			} else {
-				const url = URL.createObjectURL(new Blob([bytes]));
-				h('a', {href: url, download: name}).click();
-				setTimeout(() => URL.revokeObjectURL(url), 2000);
-				toast(`Downloaded ${name}. Put it in the game's ${FOLDERS.test} folder.`, 'good');
-			}
+			const out = await (await dir.getFileHandle(name, {create: true})).createWritable();
+			await out.write(bytes);
+			await out.close();
+			toast(`Saved ${FOLDERS.test}/${name}`, 'good');
 		} catch (e) {
-			if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
+			if (e.name === 'NotFoundError') toast(`Not saved. ${S.folder.name} has no ${FOLDERS.test} folder: link the Fight Arena folder.`, 'bad');
+			else if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
 		}
 	}
 
 	/** A test file back into the room it was saved from. */
 	async function importTest() {
+		if (hasFolderApi()) await linkTestFolder();
 		const file = await chooseFile('test');
 		if (!file) return;
 		commit();
