@@ -111,22 +111,81 @@ test('a Temple file carries each colosseum room, its gates and rounds, as the mo
 	const room = doc.colosseums[1];
 	room.config.cells[1] = [Model.line('minecraft:zombie', 4)];
 	room.config.cells[4] = [Model.line('minecraft:husk', 2, 'exact')];
+	room.config.cells[5] = [Model.line('minecraft:hoglin', 1, 'exact')];
 	room.config.groups = 2;
-	room.config.cellGroups = {1: 1, 4: 2};
+	room.config.tunes[5] = {'minecraft:hoglin': {...Model.tune(), size: 2}};
 	room.config.delay = 9;
 	room.config.reward = 500;
 	const stored = JSON.parse(JSON.stringify(doc));
 	const root = await NBT.parse(await Model.toFile(stored));
 	const one = root.ColosseumRooms.v.items[1];
 	assert.deepStrictEqual([one.X.v, one.Y.v, one.Z.v], [room.x, room.y, room.z]);
-	assert.deepStrictEqual(one.Colosseum.v.Cells.v.items.map(c => c.Cell.v), [1, 4]);
-	assert.strictEqual(one.Colosseum.v.CellGroups.v['4'].v, 2);
+	assert.deepStrictEqual(one.Colosseum.v.Cells.v.items.map(c => c.Cell.v), [1, 4, 5]);
+	assert.strictEqual(one.Colosseum.v.Groups.v, 2);
+	assert.deepStrictEqual(Object.keys(one.Colosseum.v.CellGroups.v), []);
 	const again = Model.fromFile(root, 'temple');
 	assert.deepStrictEqual(again.colosseums[1].config.cells[4], room.config.cells[4]);
 	assert.strictEqual(again.colosseums[1].config.delay, 9);
 	assert.strictEqual(again.colosseums[1].config.reward, 500);
-	assert.deepStrictEqual(Object.keys(again.colosseums[1].config.cells), ['1', '2', '3', '4']);
+	assert.deepStrictEqual(again.colosseums[1].config.cells[5], room.config.cells[5]);
+	assert.strictEqual(again.colosseums[1].config.tunes[5]['minecraft:hoglin'].size, 2);
+	assert.strictEqual(again.colosseums[1].config.groups, 2);
 	assert.deepStrictEqual(again.colosseums[0].config.cells[1], []);
+	assert.strictEqual(again.colosseums[0].config.groups, 1);
+});
+
+test('a room saved when each gate was put in a round comes in with rounds of their own', async () => {
+	const doc = Model.fresh.temple();
+	const config = doc.colosseums[0].config;
+	config.cells[1] = [Model.line('minecraft:zombie', 4)];
+	config.cells[2] = [Model.line('minecraft:husk', 2)];
+	config.cells[4] = [Model.line('minecraft:hoglin', 1)];
+	config.groups = 3;
+	config.cellGroups = {2: 1, 4: 3};
+	config.tunes[4] = {'minecraft:hoglin': {...Model.tune(), size: 2}};
+	Model.upgrade(doc);
+	assert.strictEqual(config.groups, 3);
+	assert.deepStrictEqual(config.cellGroups, {});
+	assert.strictEqual(config.cells[1][0].mob, 'minecraft:zombie');
+	assert.strictEqual(config.cells[2][0].mob, 'minecraft:husk');
+	assert.deepStrictEqual(config.cells[4], []);
+	assert.strictEqual(config.cells[12][0].mob, 'minecraft:hoglin');
+	assert.strictEqual(config.tunes[12]['minecraft:hoglin'].size, 2);
+});
+
+test('a colosseum test file holds one room, and comes back into it', async () => {
+	const doc = Model.fresh.temple();
+	const room = doc.colosseums[2];
+	room.config.cells[1] = [Model.line('minecraft:hoglin', 1, 'exact')];
+	room.config.cells[5] = [Model.line('minecraft:zombie', 3, 'exact')];
+	room.config.groups = 2;
+	const root = await NBT.parse(await Model.testFile(room));
+	assert.strictEqual(root.Kind.v, 'fight_arena_temple_colosseum');
+	assert.deepStrictEqual([root.X.v, root.Y.v, root.Z.v], [room.x, room.y, room.z]);
+	assert.strictEqual(root.Spawns, undefined);
+	assert.strictEqual(root.ColosseumRooms, undefined);
+	const fresh = Model.fresh.temple();
+	assert.strictEqual(Model.fromTest(fresh, root).level, room.level);
+	assert.strictEqual(fresh.colosseums[2].config.cells[5][0].mob, 'minecraft:zombie');
+	assert.strictEqual(fresh.colosseums[2].config.groups, 2);
+	assert.deepStrictEqual(fresh.colosseums[0].config.cells[1], []);
+	assert.strictEqual(Model.fromTest(fresh, {Kind: {v: 'fight_arena_temple'}}), null);
+});
+
+test('a round taken out moves those after it up', () => {
+	const config = Model.fresh.temple().colosseums[0].config;
+	config.groups = 3;
+	config.cells[1] = [Model.line('minecraft:zombie', 1)];
+	config.cells[5] = [Model.line('minecraft:husk', 1)];
+	config.cells[9] = [Model.line('minecraft:hoglin', 1)];
+	config.tunes[9] = {'minecraft:hoglin': {...Model.tune(), size: 2}};
+	Model.removeRound(config, 2);
+	assert.strictEqual(config.groups, 2);
+	assert.strictEqual(config.cells[1][0].mob, 'minecraft:zombie');
+	assert.strictEqual(config.cells[5][0].mob, 'minecraft:hoglin');
+	assert.deepStrictEqual(config.cells[9], []);
+	assert.strictEqual(config.tunes[5]['minecraft:hoglin'].size, 2);
+	assert.strictEqual(config.tunes[9], undefined);
 });
 
 test('the wave table matches a real export where the game has one', () => {

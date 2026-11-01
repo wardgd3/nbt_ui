@@ -5,15 +5,15 @@ const Model = (() => {
 	const N = typeof NBT !== 'undefined' ? NBT : require('./nbt.js');
 
 	const LIMITS = {
-		lines: 64, count: 200, cells: 15, roomCells: 4,
+		lines: 64, count: 200, cells: 15, roomGates: 4, roomRounds: 15, roomCells: 60,
 		delay: [1, 320], startDelay: [0, 320], raise: [1, 30], reward: [0, 1000000],
 		spawnRange: [2, 64], spawnCount: [1, 64],
 		bossScale: [0.5, 16], bossHealth: [20, 50000], lives: [1, 10], safeReward: [0, 50000],
 		size: [0.25, 3], health: [0.1, 5], speed: [0.25, 3], damage: [0.1, 5],
 	};
 	const SHAPES = ['classic', 'ring', 'column'];
-	const FOLDERS = {waves: 'wave saves', colosseum: 'colosseum', temple: 'temple saves'};
-	const COLOSSEUM_KIND = 'fight_arena_colosseum', CASTLE_KIND = 'fight_arena_castle', TEMPLE_KIND = 'fight_arena_temple';
+	const FOLDERS = {waves: 'wave saves', colosseum: 'colosseum', temple: 'temple saves', test: 'temple_colosseum_test'};
+	const COLOSSEUM_KIND = 'fight_arena_colosseum', CASTLE_KIND = 'fight_arena_castle', TEMPLE_KIND = 'fight_arena_temple', TEST_KIND = 'fight_arena_temple_colosseum';
 	const STATS = [1000, 600, 18, 16, 100, 150, 0, 140, 3, 8, 100, 800, 20, 18, 100, 1000, 250, 8, 1, 1, 250, 40, 100, 100, 600, 600, 3, 36];
 	const TEMPLE_DEFAULTS = {boss: 'dynamic_difficulty:magma_golem', bossScale: 4, bossHealth: 600, lives: 3, safeRewards: [1000, 1000, 40000]};
 	const RULES = {
@@ -85,11 +85,11 @@ const Model = (() => {
 		shape: 'classic', stats: [...STATS], tunes: {},
 	});
 
-	function readColosseum(c) {
+	function readColosseum(c, most = LIMITS.cells) {
 		const doc = newColosseum();
 		for (const cell of items(c, 'Cells')) {
 			const number = get(cell, 'Cell', 0), lines = items(cell, 'Lines').map(readLine);
-			if (number >= 1 && number <= LIMITS.cells && lines.length) doc.cells[number] = lines;
+			if (number >= 1 && number <= most && lines.length) doc.cells[number] = lines;
 		}
 		doc.groups = clamp(get(c, 'Groups', 0), [0, LIMITS.cells]);
 		for (const [cell, group] of Object.entries(get(c, 'CellGroups', {}))) {
@@ -172,18 +172,55 @@ const Model = (() => {
 
 	// --- Temple ---
 
-	/** A colosseum room: where its trap is, and its cells and rounds, tagged as a Colosseum's but for how few cells it has. */
-	const newRoom = room => ({...clone(room), config: {...newColosseum(LIMITS.roomCells), shape: room.shape}});
+	/**
+	 * A colosseum room: where its trap is, and its rounds, tagged as a Colosseum's. Each round is its own four gates: cells 1
+	 * to 4 are round 1's, 5 to 8 round 2's and so on - see TempleSpawns - and groups is how many rounds it has.
+	 */
+	const newRoom = room => ({...clone(room), config: {...newColosseum(LIMITS.roomCells), shape: room.shape, groups: 1}});
+
+	/** A room's cells from round one to round two, its mob settings with them. */
+	function moveCell(config, from, to) {
+		config.cells[to] = config.cells[from];
+		config.cells[from] = [];
+		delete config.tunes[to];
+		if (config.tunes[from]) {
+			config.tunes[to] = config.tunes[from];
+			delete config.tunes[from];
+		}
+	}
+
+	/** A room brought to rounds of their own: one saved when each gate had one line-up and was put in a round has it moved there. */
+	function settleRoom(config) {
+		for (const [cell, group] of Object.entries(config.cellGroups || {})) {
+			config.groups = Math.max(config.groups, group);
+			if (group > 1) moveCell(config, +cell, (group - 1) * LIMITS.roomGates + +cell);
+		}
+		config.cellGroups = {};
+		config.offGroups = [];
+		config.groups = clamp(config.groups, [1, LIMITS.roomRounds]);
+		for (let cell = 1; cell <= LIMITS.roomCells; cell++) config.cells[cell] ??= [];
+		return config;
+	}
+
+	/** A round taken out of a room, those after it moving up. */
+	function removeRound(config, round) {
+		const gates = LIMITS.roomGates;
+		for (let cell = (round - 1) * gates + 1; cell <= round * gates; cell++) {
+			config.cells[cell] = [];
+			delete config.tunes[cell];
+		}
+		for (let cell = round * gates + 1; cell <= config.groups * gates; cell++) moveCell(config, cell, cell - gates);
+		config.groups = Math.max(1, config.groups - 1);
+	}
 
 	function readRoom(room, tags) {
-		const read = readColosseum(tags), config = newRoom(room).config;
-		for (let cell = 1; cell <= LIMITS.roomCells; cell++) config.cells[cell] = read.cells[cell];
-		config.groups = Math.min(read.groups, LIMITS.roomCells);
-		for (const [cell, group] of Object.entries(read.cellGroups)) if (+cell <= LIMITS.roomCells && group <= config.groups) config.cellGroups[cell] = group;
-		config.offGroups = read.offGroups.filter(g => g <= config.groups);
+		const read = readColosseum(tags, LIMITS.roomCells), config = newRoom(room).config;
+		for (let cell = 1; cell <= LIMITS.roomCells; cell++) config.cells[cell] = read.cells[cell] || [];
+		config.groups = read.groups;
+		config.cellGroups = read.cellGroups;
 		for (const key of ['delay', 'startDelay', 'raise', 'reward']) config[key] = read[key];
 		config.tunes = read.tunes;
-		return config;
+		return settleRoom(config);
 	}
 
 	const newTemple = () => ({
@@ -195,6 +232,7 @@ const Model = (() => {
 	/** A Temple document saved before the colosseum rooms: given them, empty. */
 	function upgrade(doc) {
 		doc.colosseums ??= (D.colosseums || []).map(newRoom);
+		for (const room of doc.colosseums) settleRoom(room.config);
 		return doc;
 	}
 
@@ -241,6 +279,20 @@ const Model = (() => {
 		}))),
 	});
 
+	/** One colosseum room alone, to try out from the admin page's Temple section - see ColosseumTest. */
+	const testFile = room => N.serialize({
+		Kind: N.string(TEST_KIND), Version: N.int(1), X: N.int(room.x), Y: N.int(room.y), Z: N.int(room.z), Shape: N.string(room.shape),
+		Colosseum: N.compound(colosseumTags(room.config)),
+	});
+
+	/** A room's test file taken back into a Temple document: the room it was saved from, or null if it is not one. */
+	function fromTest(doc, c) {
+		if (get(c, 'Kind', '') !== TEST_KIND) return null;
+		const room = doc.colosseums.find(r => r.shape === get(c, 'Shape', ''));
+		if (room) room.config = readRoom(room, get(c, 'Colosseum', {}));
+		return room || null;
+	}
+
 	// --- files ---
 
 	const fresh = {waves: newWaves, colosseum: newColosseum, temple: newTemple};
@@ -281,11 +333,11 @@ const Model = (() => {
 			return out;
 		}
 		return [...doc.spawns.flatMap(s => lineIssues(s.entries.map(e => line(e.mob, e.count)), `Spawn ${s.x}, ${s.y}, ${s.z}`)),
-			...doc.colosseums.flatMap(r => Object.keys(r.config.cells).flatMap(c => lineIssues(r.config.cells[c], `Level ${r.level} colosseum gate ${c}`)))];
+			...doc.colosseums.flatMap(r => Object.keys(r.config.cells).flatMap(c => lineIssues(r.config.cells[c], `Level ${r.level} colosseum round ${Math.ceil(c / LIMITS.roomGates)} gate ${(c - 1) % LIMITS.roomGates + 1}`)))];
 	}
 
 	return {
-		LIMITS, SHAPES, FOLDERS, RULES, ARMED, clone, clamp, round2, line, tune, isDefaultTune, fresh, kindOf, fromFile, toFile,
+		LIMITS, SHAPES, FOLDERS, RULES, ARMED, clone, clamp, round2, removeRound, testFile, fromTest, line, tune, isDefaultTune, fresh, kindOf, fromFile, toFile,
 		isWritten, sameLines, issues, readColosseum, writers, upgrade,
 	};
 })();
