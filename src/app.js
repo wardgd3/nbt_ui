@@ -1411,23 +1411,27 @@
 	}
 
 	/**
-	 * This colosseum alone, to the game's test folder: the admin page's Start test plays the newest there. Without the folder
-	 * it is not saved at all - a copy in Downloads is one Start test would never find.
+	 * This colosseum alone: the Save dialog, opened on the game's test folder, for the user to name the file there. The game's
+	 * Import test picks it up. A browser only knows a folder it has been given, so the first time it asks for the game folder.
 	 */
 	async function saveTest() {
 		commit();
-		const r = room(), name = `colosseum_${ROOM_NAMES[r.shape].toLowerCase()}.nbt`;
-		if (!hasFolderApi()) return toast(`This browser cannot save into ${FOLDERS.test}. Use Chrome or Edge.`, 'bad');
+		const r = room();
+		if (!('showSaveFilePicker' in window)) return toast(`This browser cannot save into ${FOLDERS.test}. Use Chrome or Edge.`, 'bad');
 		if (!await linkTestFolder()) return toast(`Not saved. Pick the Fight Arena folder to save into ${FOLDERS.test}.`, 'bad');
 		try {
-			const dir = await folderFor('test', false);
+			const startIn = await folderFor('test', false);
+			const handle = await window.showSaveFilePicker({id: 'fight-arena-test', startIn, suggestedName: `colosseum_${ROOM_NAMES[r.shape].toLowerCase()}.nbt`,
+				types: [{description: 'Colosseum test', accept: {'application/octet-stream': ['.nbt']}}]});
 			const bytes = await Model.testFile(r);
-			const out = await (await dir.getFileHandle(name, {create: true})).createWritable();
+			const out = await handle.createWritable();
 			await out.write(bytes);
 			await out.close();
-			toast(`Saved ${FOLDERS.test}/${name}`, 'good');
+			toast(`Saved ${handle.name}. In the game: Admin, Temple, Import test.`, 'good');
 		} catch (e) {
-			if (e.name === 'NotFoundError') toast(`Not saved. ${S.folder.name} has no ${FOLDERS.test} folder: link the Fight Arena folder.`, 'bad');
+			// Linking just now used up the click the Save dialog needs.
+			if (e.name === 'SecurityError') toast('Folder linked. Click Save test again.', 'good');
+			else if (e.name === 'NotFoundError') toast(`Not saved. ${S.folder.name} has no ${FOLDERS.test} folder: link the Fight Arena folder.`, 'bad');
 			else if (e.name !== 'AbortError') toast(`Could not save: ${e.message}`, 'bad');
 		}
 	}
