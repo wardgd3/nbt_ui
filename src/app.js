@@ -1256,8 +1256,6 @@
 	const cleanName = name => (name.trim().replace(/\.nbt$/i, '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)) || S.mode;
 
 	async function folderFor(mode, create) {
-		// The test folder itself may be what was linked.
-		if (mode === 'test' && S.folder.name === FOLDERS.test) return S.folder;
 		return S.folder.getDirectoryHandle(FOLDERS[mode], {create});
 	}
 
@@ -1295,14 +1293,14 @@
 				if (S.folderLive) return renderFoot();
 			}
 			const handle = await window.showDirectoryPicker({id: 'fight-arena', mode: 'readwrite'});
+			// Every mode's folder hangs off the game folder: linked to anything else, they would be made inside it.
+			const names = [];
+			for await (const [name] of handle.entries()) names.push(name);
+			if (!names.includes('mods') || !names.includes('saves')) return toast(`Not linked: ${handle.name} is not the game folder. Pick the Fight Arena folder itself.`, 'bad');
 			S.folder = handle;
 			S.folderLive = true;
 			await storeHandle(handle);
-			const names = [];
-			for await (const [name] of handle.entries()) names.push(name);
-			if (handle.name === FOLDERS.test) toast(`Linked ${handle.name}`, 'good');
-			else if (!names.includes('colosseum') && !names.includes('wave saves')) toast('That folder has no colosseum or wave saves folder. It should be the Fight Arena instance folder.', 'bad');
-			else toast(`Linked ${handle.name}`, 'good');
+			toast(`Linked ${handle.name}`, 'good');
 			renderFoot();
 		} catch (e) {
 			if (e.name !== 'AbortError') toast(`Could not link the folder: ${e.message}`, 'bad');
@@ -1623,7 +1621,8 @@
 	else if (back) toast(`Could not sign in: ${back}`, 'bad');
 	if (hasFolderApi()) {
 		loadHandle().then(async handle => {
-			if (!handle) return;
+			// A link from before only the game folder would do is dropped, to be made again.
+			if (!handle || Object.values(FOLDERS).includes(handle.name)) return;
 			S.folder = handle;
 			S.folderLive = (await handle.queryPermission({mode: 'readwrite'})) === 'granted';
 			renderFoot();
