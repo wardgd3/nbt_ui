@@ -199,3 +199,27 @@ test('castle and unknown files are told apart', () => {
 	assert.strictEqual(Model.kindOf({Kind: NBT.string('fight_arena_castle')}), 'castle');
 	assert.strictEqual(Model.kindOf({Kind: NBT.string('other')}), null);
 });
+
+test('an added Mob Spawn keeps its room through a file', async () => {
+	const doc = Model.fresh.temple(), first = doc.spawns.find(s => s.room), n = doc.spawns.length;
+	const i = Model.addSpawn(doc, first.level, first.room);
+	assert.strictEqual(i, n);
+	const made = doc.spawns[i];
+	assert.ok(made.added && made.y === first.y && Math.abs(made.x - first.x) + Math.abs(made.z - first.z) >= 3);
+	made.entries.push({mob: 'minecraft:zombie', count: 3});
+	const back = Model.fromFile(await NBT.parse(await Model.toFile(doc)), 'temple');
+	assert.strictEqual(back.spawns.length, n + 1);
+	const read = back.spawns[n];
+	assert.deepStrictEqual([read.x, read.y, read.z, read.level, read.room, read.added, read.entries], [made.x, made.y, made.z, first.level, first.room, true, made.entries]);
+	assert.ok(!back.spawns[0].added);
+});
+
+test('a Temple draft from before the slots is given them, its own kept', () => {
+	const doc = Model.fresh.temple(), slots = doc.spawns.filter(s => !s.entries.length).length;
+	assert.ok(slots > 100);
+	const old = {...doc, spawns: doc.spawns.filter(s => s.entries.length)};
+	old.spawns[0].entries[0].count = 7;
+	Model.upgrade(old);
+	assert.strictEqual(old.spawns.length, doc.spawns.length);
+	assert.strictEqual(old.spawns[0].entries[0].count, 7);
+});

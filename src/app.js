@@ -45,6 +45,12 @@
 	const doc = () => S.docs[S.mode];
 	/** The colosseum room being edited, if any: picked in the Temple as room1, room2 or room3, by its level. */
 	const room = () => (S.mode === 'temple' && typeof S.sel.temple === 'string' && S.sel.temple !== 'run' ? doc().colosseums.find(r => `room${r.level}` === S.sel.temple) : null);
+	/** The room whose Mob Spawns fill the main area, if any: its level and number, picked by its heading in the Temple's rail. */
+	const spawnRoom = () => {
+		const m = S.mode === 'temple' && typeof S.sel.temple === 'string' && /^spawns(\d+):(\d+)$/.exec(S.sel.temple);
+		return m ? {level: +m[1], room: +m[2]} : null;
+	};
+	const roomLabel = n => (n ? `Room ${n}` : 'Off the main path');
 	/** A Temple Mob Spawn's plain list, not a colosseum room's line-up. */
 	const plainList = () => S.mode === 'temple' && !room();
 	/** What holds the cells, rounds and mob settings being edited: the Colosseum file, or a colosseum room's. */
@@ -152,7 +158,7 @@
 		if (S.mode === 'waves') return d.waves[at];
 		if (S.mode === 'colosseum') return d.cells[at];
 		if (room()) return room().config.cells[cellNow()];
-		return at === 'run' ? null : d.spawns[at].entries;
+		return at === 'run' || spawnRoom() ? null : d.spawns[at].entries;
 	}
 
 	const maxCount = () => (plainList() ? LIMITS.spawnCount[1] : LIMITS.count);
@@ -208,7 +214,7 @@
 		to[mode].push(last[mode]);
 		last[mode] = from[mode].pop();
 		S.docs[mode] = JSON.parse(last[mode]);
-		if (mode === 'temple' && S.sel.temple !== 'run' && !room() && !S.docs.temple.spawns[S.sel.temple]) S.sel.temple = 'run';
+		if (mode === 'temple' && S.sel.temple !== 'run' && !room() && !spawnRoom() && !S.docs.temple.spawns[S.sel.temple]) S.sel.temple = 'run';
 		S.swap = null;
 		saveDraft();
 		render();
@@ -276,7 +282,7 @@
 		document.querySelector('[aria-current="true"]')?.scrollIntoView({block: 'nearest'});
 	}
 
-	const templeOrder = () => ['run', ...LEVELS.flatMap(([level]) => [...doc().spawns.map((sp, i) => (sp.level === level ? i : -1)).filter(i => i >= 0),
+	const templeOrder = () => ['run', ...LEVELS.flatMap(([level]) => [...doc().spawns.map((sp, i) => (sp.level === level && (sp.entries.length || sp.added) ? i : -1)).filter(i => i >= 0),
 		...doc().colosseums.filter(r => r.level === level).map(r => `room${r.level}`)])];
 
 	function copyLines() {
@@ -515,7 +521,8 @@
 			S.swap = null;
 			render();
 		};
-		const inLevel = d.spawns.map((sp, i) => ({sp, i})).filter(({sp}) => sp.level === S.level);
+		// The empty slots wait on their room's map; here, what lets something out.
+		const inLevel = d.spawns.map((sp, i) => ({sp, i})).filter(({sp, i}) => sp.level === S.level && (sp.entries.length || sp.added || at === i));
 		const final = d.colosseums.find(r => r.level === S.level);
 		const rooms = new Map();
 		for (const one of inLevel) {
@@ -549,7 +556,7 @@
 				h('button', {type: 'button', class: 'spawn-row colosseum-row', 'aria-current': String(at === `room${final.level}`), onclick: () => pick(`room${final.level}`)},
 					h('i'), h('span', {}, `Colosseum: ${ROOM_NAMES[final.shape]}`), h('small', {}, finalMobs ? `${finalMobs} mobs` : 'own mix')),
 			] : null, [...rooms.entries()].map(([room, list]) => [
-				h('div', {class: 'room-head eyebrow'}, room ? `Room ${room}` : 'Off the main path'),
+				h('button', {type: 'button', class: 'room-head room-link eyebrow', 'aria-current': String(at === `spawns${S.level}:${room}`), onclick: () => pick(`spawns${S.level}:${room}`)}, roomLabel(room)),
 				list.map(({sp, i}) => h('button', {type: 'button', class: 'spawn-row', 'aria-current': String(at === i), style: `--c:${sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)'}`, onclick: () => pick(i)},
 					h('i'), h('span', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty'), h('small', {}, `r${sp.range}`))),
 			])),
@@ -800,12 +807,19 @@
 		if (S.mode === 'colosseum') return `Cell ${at}${at <= 3 ? ' · big cell' : ''}`;
 		if (room()) return `Colosseum: ${ROOM_NAMES[room().shape]} · Round ${roundNow()} · Gate ${S.gate}`;
 		if (at === 'run') return 'Boss, lives and rewards';
+		if (spawnRoom()) return roomLabel(spawnRoom().room);
 		const sp = doc().spawns[at];
 		return `${sp.room ? `Room ${sp.room}` : 'Tunnel'} Mob Spawn`;
 	}
 
 	function subtitle() {
 		const list = lines();
+		const here = spawnRoom();
+		if (here) {
+			const inRoom = roomList(here), mobs = inRoom.reduce((n, {sp}) => n + headcount(sp.entries), 0), slots = inRoom.filter(({sp}) => !sp.entries.length).length;
+			const used = inRoom.length - slots;
+			return `${LEVELS.find(([l]) => l === here.level)[1]} · ${used} Mob Spawn${used === 1 ? '' : 's'} · ${mobs} mob${mobs === 1 ? '' : 's'} · ${slots} empty slot${slots === 1 ? '' : 's'}`;
+		}
 		if (!list) return 'Temple run settings';
 		const n = headcount(list);
 		const parts = [`${n} mob${n === 1 ? '' : 's'}`, `${list.length} line${list.length === 1 ? '' : 's'}`];
@@ -826,7 +840,14 @@
 		if (!head) return;
 		const sub = subtitle();
 		const list = lines();
+		const here = spawnRoom(), added = plainList() && list && doc().spawns[S.sel.temple].added;
+		if (here) return head.replaceChildren(h('div', {}, h('h1', {}, title()), h('div', {class: 'sub'}, sub)),
+			h('div', {class: 'bar'}, h('button', {type: 'button', class: 'btn small primary', title: 'Add a Mob Spawn to this room', onclick: () => {
+				S.sel.temple = Model.addSpawn(doc(), here.level, here.room);
+				hard();
+			}}, '+ Add spawn')));
 		const actions = list ? h('div', {class: 'bar'},
+			added ? h('button', {type: 'button', class: 'btn small ghost danger', title: 'Take this added Mob Spawn out of the Temple', onclick: removeSpawn}, 'Remove spawn') : null,
 			S.mode === 'waves' && !Model.isWritten(doc(), S.sel.waves) ? btn('reset', 'Back to the game\'s table', () => {
 				doc().waves[S.sel.waves] = Model.clone(DATA.waves[S.sel.waves]);
 				hard();
@@ -849,13 +870,81 @@
 			if (S.mode === 'colosseum') body.push(cellBar());
 			const list = lines();
 			if (room()) body.push(roomPanel(room()));
-			else body.push(h('div', {class: 'scroll'}, list ? lineList(list) : runSettings(), S.mode === 'waves' ? attachBar() : null));
+			else if (planRoom()) body.push(h('div', {class: 'room-edit plan-edit'},
+				h('div', {class: 'room-side'}, roomPlan(), h('p', {class: 'room-note'}, 'Filled pins have mobs, rings are empty slots. Click one to see what it lets out and add to it.')),
+				h('div', {class: 'room-main'}, h('div', {class: 'scroll'}, list ? lineList(list) : roomCards()))));
+			else body.push(h('div', {class: 'scroll'}, list ? lineList(list) : spawnRoom() ? roomCards() : runSettings(), S.mode === 'waves' ? attachBar() : null));
 			editor.replaceChildren(h('div', {class: 'ed-head'}), ...body);
 		});
 		renderHead();
 		const next = editor.querySelector('.scroll');
 		if (next) next.scrollTop = top;
 		S.flash = null;
+	}
+
+	/** The Mob Spawns of a room, with their place in the Temple's list. */
+	const roomList = ({level, room: n}) => doc().spawns.map((sp, i) => ({sp, i})).filter(({sp}) => sp.level === level && (sp.room || 0) === n);
+
+	/** The room on the map that the picked room or Mob Spawn is in, with its level: none in the tunnels. */
+	function planRoom() {
+		if (S.mode !== 'temple' || room() || S.sel.temple === 'run') return null;
+		const here = spawnRoom();
+		const sp = here ? roomList(here)[0]?.sp : doc().spawns[S.sel.temple];
+		const box = sp && MAPDATA.levels[sp.level]?.rooms.find(r => !r.colosseum && inBox(r.box, sp.x, sp.z));
+		return box ? {level: sp.level, plan: box} : null;
+	}
+
+	/** A room from above, every Mob Spawn in it a pin to click, slots and all. */
+	function roomPlan() {
+		const {level, plan} = planRoom(), map = MAPDATA.levels[level], pad = 2, [x0, z0, x1, z1] = plan.box;
+		const svg = s('svg', {class: 'room-plan', viewBox: `${x0 - pad} ${z0 - pad} ${x1 - x0 + 1 + pad * 2} ${z1 - z0 + 1 + pad * 2}`, role: 'group', 'aria-label': `${plan.name} from above`});
+		svg.append(s('image', {href: `src/map/level${level}.png`, x: map.x0, y: map.z0, width: map.w, height: map.h, preserveAspectRatio: 'none'}));
+		doc().spawns.forEach((sp, i) => {
+			if (sp.level !== level || !inBox(plan.box, sp.x, sp.z)) return;
+			const on = S.sel.temple === i, full = sp.entries.length > 0;
+			svg.append(s('circle', {class: `plan-pin${full ? '' : ' slot'}${on ? ' on' : ''}`, cx: sp.x + 0.5, cy: sp.z + 0.5, r: on ? 2 : 1.5, style: full ? `--c:${factionColor(sp.entries[0].mob)}` : '', onclick: () => {
+				S.sel.temple = i;
+				S.swap = null;
+				render();
+			}}, s('title', {}, full ? sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') : `Empty slot at ${sp.x}, ${sp.y}, ${sp.z}`)));
+		});
+		return h('div', {class: 'plan-wrap'}, h('div', {class: 'eyebrow'}, plan.name), svg);
+	}
+
+	/** What fills the main area for a room: a card for each Mob Spawn with mobs, each opening that spawn's editor. */
+	function roomCards() {
+		return h('div', {class: 'spawn-cards'}, roomList(spawnRoom()).filter(({sp}) => sp.entries.length || sp.added).map(({sp, i}) => h('button', {type: 'button', class: 'spawn-card', onclick: () => {
+			S.sel.temple = i;
+			render();
+		}},
+			h('div', {class: 'spawn-card-head'}, h('b', {}, `${sp.x}, ${sp.y}, ${sp.z}`), sp.added ? h('em', {}, 'Added') : null, h('small', {}, `range ${sp.range}`)),
+			sp.entries.length ? sp.entries.map(e => h('div', {class: 'spawn-card-mob', style: `--c:${factionColor(e.mob)}`}, h('i'), h('span', {}, `${e.count} ${mobName(e.mob)}`)))
+				: h('div', {class: 'spawn-card-none'}, 'Empty, click to add mobs'))));
+	}
+
+	/** An added Mob Spawn taken out; its room shown again, the game taking its block away on the next import. */
+	function removeSpawn() {
+		const sp = doc().spawns[S.sel.temple], key = `spawns${sp.level}:${sp.room || 0}`;
+		doc().spawns.splice(S.sel.temple, 1);
+		S.sel.temple = doc().spawns.some(o => o.level === sp.level && (o.room || 0) === (sp.room || 0)) ? key : 'run';
+		hard();
+	}
+
+	/** Where an added Mob Spawn stands, to move it. */
+	function spotRow() {
+		const sp = doc().spawns[S.sel.temple];
+		if (!sp.added) return null;
+		const axis = key => h('input', {inputmode: 'numeric', 'aria-label': key.toUpperCase(), value: sp[key], onchange: e => {
+			const n = parseInt(e.target.value, 10), to = {x: sp.x, y: sp.y, z: sp.z, [key]: n};
+			if (Number.isNaN(n)) return renderEditor();
+			if (doc().spawns.some(o => o !== sp && o.x === to.x && o.y === to.y && o.z === to.z)) {
+				toast('A Mob Spawn stands there already', 'bad');
+				return renderEditor();
+			}
+			sp[key] = n;
+			hard();
+		}});
+		return h('div', {class: 'spot-row'}, 'Stands at', axis('x'), axis('y'), axis('z'));
 	}
 
 	function cellBar() {
@@ -920,11 +1009,12 @@
 	}
 
 	function lineList(list) {
-		if (!list.length) {
-			return h('div', {class: 'empty'}, h('b', {}, 'Nothing here yet'), 'Pick mobs from the list on the right, or press ', h('kbd', {}, '/'), ' and type a name like ', h('kbd', {}, 'orc 5'));
-		}
 		const temple = plainList();
-		const box = h('div', {class: 'lines'}, temple ? rangeRow() : null);
+		if (!list.length) {
+			return [temple ? h('div', {class: 'lines', style: 'padding-bottom:0'}, spotRow(), rangeRow()) : null,
+				h('div', {class: 'empty'}, h('b', {}, 'Nothing here yet'), 'Pick mobs from the list on the right, or press ', h('kbd', {}, '/'), ' and type a name like ', h('kbd', {}, 'orc 5'))];
+		}
+		const box = h('div', {class: 'lines'}, temple ? spotRow() : null, temple ? rangeRow() : null);
 		list.forEach((line, i) => box.append(temple ? spawnLine(line, i, list) : waveLine(line, i, list)));
 		return box;
 	}

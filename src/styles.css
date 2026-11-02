@@ -199,6 +199,9 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .map circle:hover { stroke: var(--ink); }
 
 .room-head { padding: 9px 14px 3px; }
+.room-link { display: block; width: 100%; border: 0; background: none; text-align: left; }
+.room-link:hover { color: var(--ink); background: var(--raised); }
+.room-link[aria-current="true"] { color: var(--ink); background: var(--raised-2); box-shadow: inset 3px 0 0 var(--ember); }
 .map .map-room { fill: var(--ember-soft); stroke: var(--ember); stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
 .colosseum-row { font-weight: 600; color: var(--ink); }
 .colosseum-row i { background: none; box-shadow: 0 0 0 2px var(--ember); width: 7px; height: 7px; }
@@ -206,6 +209,14 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .room-edit { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); }
 .room-side { min-height: 0; overflow-y: auto; border-right: 1px solid var(--line-soft); }
 .room-main { min-height: 0; display: flex; flex-direction: column; }
+.plan-edit { grid-template-columns: minmax(320px, 52%) minmax(0, 1fr); }
+.plan-wrap { padding: 12px 14px 4px; display: flex; flex-direction: column; gap: 6px; }
+.room-plan { display: block; width: 100%; aspect-ratio: 1; border-radius: 6px; background: var(--raised); }
+.room-plan image { image-rendering: pixelated; }
+.plan-pin { fill: var(--c); stroke: #14110f; stroke-width: .4; cursor: pointer; }
+.plan-pin.slot { fill: rgba(20, 17, 15, .55); stroke: var(--ink-2); stroke-width: .5; }
+.plan-pin:hover { stroke: var(--ink); stroke-width: .7; }
+.plan-pin.on { stroke: var(--ember); stroke-width: .8; }
 .room-note { margin: 4px 14px 11px; color: var(--ink-3); font-size: 13px; }
 @media (max-width: 900px) { .room-edit { grid-template-columns: 1fr; overflow-y: auto; } .room-side { border-right: 0; overflow: visible; } }
 .spawn-row { width: 100%; display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 14px; border: 0; background: none; text-align: left; color: var(--ink-2); }
@@ -214,6 +225,18 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .spawn-row i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 .spawn-row span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spawn-row small { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.spawn-cards { padding: 14px 20px 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; align-items: start; }
+.spawn-card { display: flex; flex-direction: column; gap: 5px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); text-align: left; color: var(--ink-2); }
+.spawn-card:hover { border-color: var(--ember); color: var(--ink); }
+.spawn-card-head { display: flex; align-items: baseline; gap: 8px; padding-bottom: 3px; font-variant-numeric: tabular-nums; }
+.spawn-card-head b { color: var(--ink); font-weight: 600; }
+.spawn-card-head em { color: var(--ember); font-style: normal; font-size: 12px; }
+.spawn-card-head small { margin-left: auto; color: var(--ink-3); }
+.spawn-card-mob { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 8px; }
+.spawn-card-mob i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.spawn-card-none { color: var(--ink-3); }
+.spot-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; color: var(--ink-2); }
+.spot-row input { width: 76px; font-variant-numeric: tabular-nums; }
 
 /* --- editor --- */
 

@@ -15,7 +15,7 @@ const Model = (() => {
 	const FOLDERS = {waves: 'wave saves', colosseum: 'colosseum', temple: 'temple saves', test: 'temple_colosseum_test'};
 	const COLOSSEUM_KIND = 'fight_arena_colosseum', CASTLE_KIND = 'fight_arena_castle', TEMPLE_KIND = 'fight_arena_temple', TEST_KIND = 'fight_arena_temple_colosseum';
 	const STATS = [1000, 600, 18, 16, 100, 150, 0, 140, 3, 8, 100, 800, 20, 18, 100, 1000, 250, 8, 1, 1, 250, 40, 100, 100, 600, 600, 3, 36];
-	const TEMPLE_DEFAULTS = {boss: 'dynamic_difficulty:magma_golem', bossScale: 4, bossHealth: 600, lives: 3, safeRewards: [1000, 1000, 40000]};
+	const TEMPLE_DEFAULTS = {boss: 'dynamic_difficulty:lesser_demon', bossScale: 9, bossHealth: 600, lives: 3, safeRewards: [1000, 1000, 40000]};
 	const RULES = {
 		table: {label: 'Scaled', hint: 'Scales with difficulty and team size'},
 		exact: {label: 'Exact', hint: 'This many, whatever the team'},
@@ -229,10 +229,12 @@ const Model = (() => {
 		colosseums: (D.colosseums || []).map(newRoom),
 	});
 
-	/** A Temple document saved before the colosseum rooms: given them, empty. */
+	/** A Temple document saved before the colosseum rooms, or the rooms' empty slots: given them. */
 	function upgrade(doc) {
 		doc.colosseums ??= (D.colosseums || []).map(newRoom);
 		for (const room of doc.colosseums) settleRoom(room.config);
+		const at = s => `${s.x},${s.y},${s.z}`, known = new Set(doc.spawns.map(at));
+		for (const s of D.spawns) if (!known.has(at(s))) doc.spawns.push({...clone(s), entries: s.entries.map(e => ({mob: e.mob, count: e.count}))});
 		return doc;
 	}
 
@@ -249,7 +251,7 @@ const Model = (() => {
 			const x = get(one, 'X', 0), y = get(one, 'Y', 0), z = get(one, 'Z', 0);
 			let spawn = known.get(at({x, y, z}));
 			if (!spawn) {
-				spawn = {x, y, z, level: y < 70 ? 0 : Math.min(3, 1 + Math.floor((y - 70) / 50)), room: 0, cell: [0, 0], range: 12, entries: []};
+				spawn = {x, y, z, level: get(one, 'Level', y < 70 ? 0 : Math.min(3, 1 + Math.floor((y - 70) / 50))), room: get(one, 'Room', 0), cell: [0, 0], range: 12, entries: [], added: !!get(one, 'Added', 0)};
 				doc.spawns.push(spawn);
 			}
 			spawn.range = clamp(get(one, 'Range', spawn.range), LIMITS.spawnRange);
@@ -273,11 +275,31 @@ const Model = (() => {
 		Spawns: N.list(doc.spawns.map(s => ({
 			X: N.int(s.x), Y: N.int(s.y), Z: N.int(s.z), Range: N.int(s.range),
 			Entries: N.list(s.entries.map(e => ({Mob: N.string(e.mob), Count: N.int(e.count)}))),
+			...(s.added ? {Added: N.int(1), Level: N.int(s.level), Room: N.int(s.room)} : {}),
 		}))),
 		ColosseumRooms: N.list(doc.colosseums.map(r => ({
 			X: N.int(r.x), Y: N.int(r.y), Z: N.int(r.z), Colosseum: N.compound(colosseumTags(r.config)),
 		}))),
 	});
+
+	/**
+	 * A new Mob Spawn in a room, empty, its place in the list given back: on the floor a few blocks from the room's first, the nearest
+	 * spot clear of the others. The game puts the block there on import, so long as nothing solid is in the way - see TempleSpawns.
+	 */
+	function addSpawn(doc, level, room) {
+		const base = doc.spawns.find(s => s.level === level && (s.room || 0) === room);
+		const clear = (x, z) => !doc.spawns.some(s => s.y === base.y && Math.abs(s.x - x) < 2 && Math.abs(s.z - z) < 2);
+		let x = base.x, z = base.z;
+		find: for (let r = 3; r < 40; r++) {
+			for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+				if (!clear(base.x + dx * r, base.z + dz * r)) continue;
+				x = base.x + dx * r;
+				z = base.z + dz * r;
+				break find;
+			}
+		}
+		return doc.spawns.push({x, y: base.y, z, level, room, cell: [...base.cell], range: base.range, entries: [], added: true}) - 1;
+	}
 
 	/** One colosseum room alone, to try out from the admin page's Temple section - see ColosseumTest. */
 	const testFile = room => N.serialize({
@@ -337,7 +359,7 @@ const Model = (() => {
 	}
 
 	return {
-		LIMITS, SHAPES, FOLDERS, RULES, ARMED, clone, clamp, round2, removeRound, testFile, fromTest, line, tune, isDefaultTune, fresh, kindOf, fromFile, toFile,
+		LIMITS, SHAPES, FOLDERS, RULES, ARMED, clone, clamp, round2, removeRound, addSpawn, testFile, fromTest, line, tune, isDefaultTune, fresh, kindOf, fromFile, toFile,
 		isWritten, sameLines, issues, readColosseum, writers, upgrade,
 	};
 })();
