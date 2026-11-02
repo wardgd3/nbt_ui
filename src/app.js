@@ -1039,11 +1039,26 @@
 	function rangeRow() {
 		const sp = doc().spawns[S.sel.temple];
 		const out = h('output', {}, sp.range);
+		/** The range on the room's map, while the slider is held: its reach is a sphere, so a circle from above. */
+		const reach = on => {
+			const plan = document.querySelector('.room-plan');
+			if (!plan) return;
+			let ring = plan.querySelector('.plan-range');
+			if (!on) return ring?.remove();
+			if (!ring) plan.append(ring = s('circle', {class: 'plan-range', cx: sp.x + 0.5, cy: sp.z + 0.5}));
+			ring.setAttribute('r', sp.range);
+		};
 		return h('label', {class: 'slide', style: 'grid-template-columns:auto minmax(0,1fr) 42px;margin-bottom:6px'}, 'Trigger range',
 			h('input', {type: 'range', min: LIMITS.spawnRange[0], max: LIMITS.spawnRange[1], value: sp.range,
+				onpointerdown: () => {
+					reach(true);
+					addEventListener('pointerup', () => reach(false), {once: true});
+					addEventListener('pointercancel', () => reach(false), {once: true});
+				},
 				oninput: e => {
 					sp.range = +e.target.value;
 					out.textContent = sp.range;
+					reach(true);
 				},
 				onchange: () => hard()}), out);
 	}
