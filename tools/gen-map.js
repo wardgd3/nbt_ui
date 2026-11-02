@@ -104,6 +104,14 @@ const COLORS = {
 	[DOOR]: hex('#7fbf7a'), [GATE]: hex('#e8604f'), [FIXTURE]: hex('#8a6c4c'), [GREEN]: hex('#5e8a4e'),
 };
 const EDGE = hex('#d9ccba');
+/** The rooms' own maps, in the app's dark: as the level maps but for their colors. */
+const DARK = {
+	colors: {
+		[WALL]: hex('#14110f'), [MASS]: hex('#14110f'), [FLOOR]: hex('#2a241f'), [LAVA]: hex('#9a4a20'), [WATER]: hex('#2b5a7d'), [DROP]: hex('#0c0a09'),
+		[DOOR]: hex('#4f7a4c'), [GATE]: hex('#94402f'), [FIXTURE]: hex('#40362d'), [GREEN]: hex('#34462f'),
+	},
+	edge: hex('#6d6155'), hatch: hex('#2e2823'),
+};
 
 /** The open air round the building: drops that reach the picture's edge. */
 function skyOf({w, h, kind}) {
@@ -132,7 +140,7 @@ function skyOf({w, h, kind}) {
 	return sky;
 }
 
-function paint(p) {
+function paint(p, {colors = COLORS, edge = EDGE, hatch = hex('#3a312a')} = {}) {
 	const {w, h, kind, top, box} = p;
 	const near = distances(p, k => k !== WALL);
 	const W = w * SCALE, H = h * SCALE;
@@ -149,7 +157,7 @@ function paint(p) {
 			const i = x + w * z;
 			let k = kind[i];
 			if (k === WALL && near[i] > 7) k = MASS;
-			let color = COLORS[k];
+			let color = colors[k];
 			if (k === FLOOR || k === FIXTURE || k === GREEN || k === LAVA || k === WATER) {
 				// Higher is lighter, and each rise catches the light from the top left.
 				const lift = (top[i] - box.y0) / span, a = at(x - 1, z - 1);
@@ -161,9 +169,9 @@ function paint(p) {
 				for (let ox = 0; ox < SCALE; ox++) {
 					const o = ((z * SCALE + oz) * W + x * SCALE + ox) * 4;
 					let c = color, alpha = sky[i] ? 0 : 255;
-					if (k === DROP && (x * SCALE + ox + z * SCALE + oz) % 10 < 2) c = hex('#3a312a');
+					if (k === DROP && (x * SCALE + ox + z * SCALE + oz) % 10 < 2) c = hatch;
 					if (kind[i] !== WALL && ((ox === 0 && wallAt(x - 1, z)) || (ox === SCALE - 1 && wallAt(x + 1, z)) || (oz === 0 && wallAt(x, z - 1)) || (oz === SCALE - 1 && wallAt(x, z + 1)))) {
-						c = EDGE;
+						c = edge;
 						alpha = 255;
 					}
 					rgba[o] = c[0];
@@ -375,6 +383,7 @@ const map = {version, scale: SCALE, levels: {}};
 for (const level of [1, 2, 3]) {
 	const p = plan(level);
 	fs.writeFileSync(path.join(OUT, `level${level}.png`), paint(p));
+	fs.writeFileSync(path.join(OUT, `plan${level}.png`), paint(p, DARK));
 	const list = planned[level];
 	const {nearestOpen, walk} = walker(p);
 		const route = [], locked = [];

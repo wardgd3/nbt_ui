@@ -211,12 +211,13 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .room-main { min-height: 0; display: flex; flex-direction: column; }
 .plan-edit { grid-template-columns: minmax(320px, 52%) minmax(0, 1fr); }
 .plan-wrap { padding: 12px 14px 4px; display: flex; flex-direction: column; gap: 6px; }
-.room-plan { display: block; width: 100%; aspect-ratio: 1; border-radius: 6px; background: var(--raised); }
+.room-plan { display: block; width: 100%; aspect-ratio: 1; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--bg); }
 .room-plan image { image-rendering: pixelated; }
-.plan-pin { fill: var(--c); stroke: #14110f; stroke-width: .4; cursor: pointer; }
-.plan-pin.slot { fill: rgba(20, 17, 15, .55); stroke: var(--ink-2); stroke-width: .5; }
-.plan-pin:hover { stroke: var(--ink); stroke-width: .7; }
-.plan-pin.on { stroke: var(--ember); stroke-width: .8; }
+.plan-pin { fill: var(--c); stroke: var(--bg); stroke-width: .35; cursor: pointer; transition: filter .1s; }
+.plan-pin.slot { fill: var(--bg); stroke: var(--ink-3); stroke-width: .22; stroke-dasharray: .55 .4; }
+.plan-pin:hover { filter: brightness(1.25); }
+.plan-pin.slot:hover { stroke: var(--ink); }
+.plan-pin.on { stroke: var(--ink); stroke-width: .4; stroke-dasharray: none; }
 .plan-range { fill: none; stroke: #e5383b; stroke-width: 2px; vector-effect: non-scaling-stroke; pointer-events: none; }
 .room-note { margin: 4px 14px 11px; color: var(--ink-3); font-size: 13px; }
 @media (max-width: 900px) { .room-edit { grid-template-columns: 1fr; overflow-y: auto; } .room-side { border-right: 0; overflow: visible; } }
@@ -233,7 +234,10 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 .spawn-card-head b { color: var(--ink); font-weight: 600; }
 .spawn-card-head em { color: var(--ember); font-style: normal; font-size: 12px; }
 .spawn-card-head small { margin-left: auto; color: var(--ink-3); }
-.spawn-card-mob { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 8px; }
+.spawn-card-mob { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-radius: 4px; }
+.spawn-card-mob:hover { color: var(--ink); background: var(--raised-2); }
+.spawn-card-mob em { color: var(--ember); font-style: normal; font-size: 12px; }
+.mob-link:hover { color: var(--ink); text-decoration: underline; }
 .spawn-card-mob i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
 .spawn-card-none { color: var(--ink-3); }
 .spot-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; color: var(--ink-2); }
@@ -260,7 +264,7 @@ kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); b
 	border: 1px solid var(--line-soft);
 	border-radius: var(--radius);
 }
-.row.simple { grid-template-columns: minmax(150px, 1fr) 118px auto; }
+.row.simple { grid-template-columns: minmax(150px, 1fr) 118px auto auto; }
 .row.flash { animation: flash .5s ease-out; }
 @keyframes flash { from { border-color: var(--ember); background: #3a2a1d; } }
 @media (prefers-reduced-motion: reduce) { .row.flash { animation: none; } }

@@ -223,3 +223,12 @@ test('a Temple draft from before the slots is given them, its own kept', () => {
 	assert.strictEqual(old.spawns.length, doc.spawns.length);
 	assert.strictEqual(old.spawns[0].entries[0].count, 7);
 });
+
+test('a mob set for a room comes back from its file on that line alone', async () => {
+	const doc = Model.fresh.temple(), sp = doc.spawns.find(s => s.entries.length > 0);
+	sp.entries[0].tune = {...Model.tune(), size: 2, health: 3.5, primary: 'x:gun'};
+	const back = Model.fromFile(await NBT.parse(await Model.toFile(doc)), 'temple');
+	const read = back.spawns.find(s => s.x === sp.x && s.y === sp.y && s.z === sp.z);
+	assert.deepStrictEqual(read.entries[0].tune, sp.entries[0].tune);
+	assert.strictEqual(back.spawns.filter(s => s.entries.some(e => e.tune)).length, 1);
+});

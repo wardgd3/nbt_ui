@@ -103,6 +103,7 @@
 		search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
 		reset: 'M4 12a8 8 0 1 0 3-6.2M4 4v5h5',
 		plus: 'M12 5v14M5 12h14',
+		swap: 'M4 8h15l-4-4M20 16H5l4 4',
 		help: 'M9 9a3 3 0 1 1 4.5 2.6c-1 .6-1.5 1.2-1.5 2.4M12 18v.5',
 	};
 
@@ -242,6 +243,17 @@
 
 	// --- line-up changes ---
 
+	/** A mob's settings in a room are shared by its every Mob Spawn there: kept on each line of it. */
+	const roomMates = sp => doc().spawns.filter(o => o.level === sp.level && (o.room || 0) === (sp.room || 0));
+	const roomTune = (sp, mob) => roomMates(sp).flatMap(o => o.entries).find(e => e.mob === mob && e.tune)?.tune || null;
+	function setRoomTune(sp, mob, tune) {
+		for (const e of roomMates(sp).flatMap(o => o.entries)) {
+			if (e.mob !== mob) continue;
+			if (tune) e.tune = {...tune};
+			else delete e.tune;
+		}
+	}
+
 	function addMob(id, count = 1) {
 		const list = lines();
 		if (!list) return toast('Pick a Mob Spawn first');
@@ -249,13 +261,21 @@
 		if (S.swap != null && list[S.swap]) {
 			const line = list[S.swap];
 			line.mob = id;
+			if (temple) {
+				const tune = roomTune(doc().spawns[S.sel.temple], id);
+				if (tune) line.tune = {...tune};
+				else delete line.tune;
+			}
 			S.flash = id;
 			S.swap = null;
 			return hard();
 		}
 		const same = list.find(l => l.mob === id && (temple || l.kind === 'table' || l.kind === 'exact'));
 		if (same) same.count = Math.min(maxCount(), same.count + count);
-		else if (temple) list.push({mob: id, count: Math.min(maxCount(), count)});
+		else if (temple) {
+			const tune = roomTune(doc().spawns[S.sel.temple], id);
+			list.push({mob: id, count: Math.min(maxCount(), count), ...(tune ? {tune: {...tune}} : {})});
+		}
 		else {
 			if (list.length >= LIMITS.lines) return toast(`A line-up holds at most ${LIMITS.lines} lines`, 'bad');
 			list.push(Model.line(id, Math.min(maxCount(), count), 'exact'));
@@ -521,6 +541,10 @@
 			S.swap = null;
 			render();
 		};
+		const openMob = (i, mob) => {
+			S.tuneOpen = mob ? `spawn:${i}:${mob}` : null;
+			pick(i);
+		};
 		// The empty slots wait on their room's map; here, what lets something out.
 		const inLevel = d.spawns.map((sp, i) => ({sp, i})).filter(({sp, i}) => sp.level === S.level && (sp.entries.length || sp.added || at === i));
 		const final = d.colosseums.find(r => r.level === S.level);
@@ -557,8 +581,11 @@
 					h('i'), h('span', {}, `Colosseum: ${ROOM_NAMES[final.shape]}`), h('small', {}, finalMobs ? `${finalMobs} mobs` : 'own mix')),
 			] : null, [...rooms.entries()].map(([room, list]) => [
 				h('button', {type: 'button', class: 'room-head room-link eyebrow', 'aria-current': String(at === `spawns${S.level}:${room}`), onclick: () => pick(`spawns${S.level}:${room}`)}, roomLabel(room)),
-				list.map(({sp, i}) => h('button', {type: 'button', class: 'spawn-row', 'aria-current': String(at === i), style: `--c:${sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)'}`, onclick: () => pick(i)},
-					h('i'), h('span', {}, sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') || 'Empty'), h('small', {}, `r${sp.range}`))),
+				list.map(({sp, i}) => h('button', {type: 'button', class: 'spawn-row', 'aria-current': String(at === i), style: `--c:${sp.entries[0] ? factionColor(sp.entries[0].mob) : 'var(--f-other)'}`, onclick: () => openMob(i, sp.entries[0]?.mob)},
+					h('i'), h('span', {}, sp.entries.length ? sp.entries.flatMap((e, k) => [k ? ', ' : null, h('span', {class: 'mob-link', title: `${mobName(e.mob)} settings for this room`, onclick: ev => {
+						ev.stopPropagation();
+						openMob(i, e.mob);
+					}}, `${e.count} ${mobName(e.mob)}`)]) : 'Empty'), h('small', {}, `r${sp.range}`))),
 			])),
 		];
 	}
@@ -898,13 +925,14 @@
 	function roomPlan() {
 		const {level, plan} = planRoom(), map = MAPDATA.levels[level], pad = 2, [x0, z0, x1, z1] = plan.box;
 		const svg = s('svg', {class: 'room-plan', viewBox: `${x0 - pad} ${z0 - pad} ${x1 - x0 + 1 + pad * 2} ${z1 - z0 + 1 + pad * 2}`, role: 'group', 'aria-label': `${plan.name} from above`});
-		svg.append(s('image', {href: `src/map/level${level}.png`, x: map.x0, y: map.z0, width: map.w, height: map.h, preserveAspectRatio: 'none'}));
+		svg.append(s('image', {href: `src/map/plan${level}.png`, x: map.x0, y: map.z0, width: map.w, height: map.h, preserveAspectRatio: 'none'}));
 		doc().spawns.forEach((sp, i) => {
 			if (sp.level !== level || !inBox(plan.box, sp.x, sp.z)) return;
 			const on = S.sel.temple === i, full = sp.entries.length > 0;
-			svg.append(s('circle', {class: `plan-pin${full ? '' : ' slot'}${on ? ' on' : ''}`, cx: sp.x + 0.5, cy: sp.z + 0.5, r: on ? 2 : 1.5, style: full ? `--c:${factionColor(sp.entries[0].mob)}` : '', onclick: () => {
+			svg.append(s('circle', {class: `plan-pin${full ? '' : ' slot'}${on ? ' on' : ''}`, cx: sp.x + 0.5, cy: sp.z + 0.5, r: on ? 1.8 : 1.3, style: full ? `--c:${factionColor(sp.entries[0].mob)}` : '', onclick: () => {
 				S.sel.temple = i;
 				S.swap = null;
+				S.tuneOpen = null;
 				render();
 			}}, s('title', {}, full ? sp.entries.map(e => `${e.count} ${mobName(e.mob)}`).join(', ') : `Empty slot at ${sp.x}, ${sp.y}, ${sp.z}`)));
 		});
@@ -915,10 +943,16 @@
 	function roomCards() {
 		return h('div', {class: 'spawn-cards'}, roomList(spawnRoom()).filter(({sp}) => sp.entries.length || sp.added).map(({sp, i}) => h('button', {type: 'button', class: 'spawn-card', onclick: () => {
 			S.sel.temple = i;
+			S.tuneOpen = null;
 			render();
 		}},
 			h('div', {class: 'spawn-card-head'}, h('b', {}, `${sp.x}, ${sp.y}, ${sp.z}`), sp.added ? h('em', {}, 'Added') : null, h('small', {}, `range ${sp.range}`)),
-			sp.entries.length ? sp.entries.map(e => h('div', {class: 'spawn-card-mob', style: `--c:${factionColor(e.mob)}`}, h('i'), h('span', {}, `${e.count} ${mobName(e.mob)}`)))
+			sp.entries.length ? sp.entries.map(e => h('div', {class: 'spawn-card-mob', style: `--c:${factionColor(e.mob)}`, title: `${mobName(e.mob)} settings for this room`, onclick: ev => {
+				ev.stopPropagation();
+				S.sel.temple = i;
+				S.tuneOpen = `spawn:${i}:${e.mob}`;
+				render();
+			}}, h('i'), h('span', {}, `${e.count} ${mobName(e.mob)}`), e.tune ? h('em', {}, 'changed') : null))
 				: h('div', {class: 'spawn-card-none'}, 'Empty, click to add mobs'))));
 	}
 
@@ -1064,10 +1098,22 @@
 	}
 
 	function spawnLine(line, i, list) {
-		return h('div', {class: `row simple ${S.flash === line.mob ? 'flash' : ''} ${S.swap === i ? 'swapping' : ''}`},
-			who(line, i),
+		const key = `spawn:${S.sel.temple}:${line.mob}`, open = S.tuneOpen === key;
+		const row = h('div', {class: `row simple ${S.flash === line.mob ? 'flash' : ''} ${S.swap === i ? 'swapping' : ''}`},
+			h('button', {type: 'button', class: 'who', style: `--c:${factionColor(line.mob)}`, title: 'Size, health, speed and damage in this room', 'aria-expanded': String(open), onclick: () => {
+				S.tuneOpen = open ? null : key;
+				renderEditor();
+			}}, h('i'), h('span', {}, h('b', {}, mobName(line.mob)), h('small', {class: line.tune ? 'tuned' : ''}, line.tune ? 'Changed for this room' : line.mob))),
 			stepper(line.count, v => { line.count = v; }, LIMITS.spawnCount[1], `c${i}`),
+			btn('swap', 'Swap for another mob', () => {
+				S.swap = S.swap === i ? null : i;
+				renderEditor();
+				renderPalette();
+				searchBox()?.focus();
+			}, {class: 'small icon ghost'}),
 			removeBtn(list, i));
+		if (open) row.append(roomTunePanel(line.mob));
+		return row;
 	}
 
 	function waveLine(line, i, list) {
@@ -1141,6 +1187,35 @@
 			const own = (tunes[scope] ??= {});
 			own[mob] = {...(own[mob] || shown), [key]: value};
 		};
+		const word = S.mode === 'waves' ? 'wave' : room() ? 'gate' : 'cell';
+		const own = tunes[scope]?.[mob];
+		return h('div', {class: 'tune'},
+			h('header', {}, seg([['this', `This ${word}`], ['all', `Every ${word}`]], S.tuneScope, v => { S.tuneScope = v; renderEditor(); }),
+				own ? h('button', {type: 'button', class: 'btn small ghost', onclick: () => {
+					delete tunes[scope][mob];
+					if (!Object.keys(tunes[scope]).length) delete tunes[scope];
+					hard();
+				}}, 'Reset') : null),
+			tuneControls(shown, write, mob));
+	}
+
+	/** A mob's settings for the whole of the picked spawn's room. */
+	function roomTunePanel(mob) {
+		const sp = doc().spawns[S.sel.temple], kept = roomTune(sp, mob), shown = {...Model.tune(), ...kept};
+		const write = (key, value) => {
+			shown[key] = value;
+			setRoomTune(sp, mob, Model.isDefaultTune(shown) ? null : shown);
+		};
+		return h('div', {class: 'tune'},
+			h('header', {}, h('span', {class: 'eyebrow'}, `Every ${mobName(mob)}, ${roomLabel(sp.room || 0)}`),
+				kept ? h('button', {type: 'button', class: 'btn small ghost', onclick: () => {
+					setRoomTune(sp, mob, null);
+					hard();
+				}}, 'Reset') : null),
+			tuneControls(shown, write, mob));
+	}
+
+	function tuneControls(shown, write, mob) {
 		const slider = (key, label, limits) => {
 			const out = h('output', {}, `${shown[key].toFixed(2)}×`);
 			return h('label', {class: 'slide'}, label, h('input', {type: 'range', min: limits[0], max: limits[1], step: 0.05, value: shown[key],
@@ -1155,18 +1230,9 @@
 				h('option', {value: '', selected: !shown[key]}, 'His own'),
 				none ? h('option', {value: 'none', selected: shown[key] === 'none'}, 'None') : null,
 				options.map(g => h('option', {value: g.id, selected: g.id === shown[key]}, g.name))));
-		const word = S.mode === 'waves' ? 'wave' : room() ? 'gate' : 'cell';
-		const own = tunes[scope]?.[mob];
-		return h('div', {class: 'tune'},
-			h('header', {}, seg([['this', `This ${word}`], ['all', `Every ${word}`]], S.tuneScope, v => { S.tuneScope = v; renderEditor(); }),
-				own ? h('button', {type: 'button', class: 'btn small ghost', onclick: () => {
-					delete tunes[scope][mob];
-					if (!Object.keys(tunes[scope]).length) delete tunes[scope];
-					hard();
-				}}, 'Reset') : null),
-			slider('size', 'Size', LIMITS.size), slider('health', 'Health', LIMITS.health), slider('speed', 'Speed', LIMITS.speed), slider('damage', 'Damage', LIMITS.damage),
+		return [slider('size', 'Size', LIMITS.size), slider('health', 'Health', LIMITS.health), slider('speed', 'Speed', LIMITS.speed), slider('damage', 'Damage', LIMITS.damage),
 			ARMED.includes(mob) ? [slider('gun', 'Gun', LIMITS.damage), slider('grenade', 'Grenade', LIMITS.damage),
-				gunPick('primary', 'Main gun', DATA.guns.primary), gunPick('sidearm', 'Sidearm', DATA.guns.sidearm, true)] : null);
+				gunPick('primary', 'Main gun', DATA.guns.primary), gunPick('sidearm', 'Sidearm', DATA.guns.sidearm, true)] : null];
 	}
 
 	function attachBar() {

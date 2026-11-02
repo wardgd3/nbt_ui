@@ -49,16 +49,20 @@ const Model = (() => {
 	const tune = () => ({size: 1, health: 1, speed: 1, damage: 1, gun: 1, grenade: 1, primary: '', sidearm: ''});
 	const isDefaultTune = t => ['size', 'health', 'speed', 'damage', 'gun', 'grenade'].every(k => t[k] === 1) && !t.primary && !t.sidearm;
 
+	const readTune = c => ({
+		size: round2(get(c, 'Size', 1)), health: round2(get(c, 'Health', 1)), speed: round2(get(c, 'Speed', 1)),
+		damage: round2(get(c, 'Damage', 1)), gun: round2(get(c, 'Gun', 1)), grenade: round2(get(c, 'Grenade', 1)),
+		primary: get(c, 'Primary', ''), sidearm: get(c, 'Sidearm', ''),
+	});
+	const tuneTags = t => ({Size: N.float(t.size), Health: N.float(t.health), Speed: N.float(t.speed), Damage: N.float(t.damage), Gun: N.float(t.gun), Grenade: N.float(t.grenade),
+		Primary: N.string(t.primary), Sidearm: N.string(t.sidearm)});
+
 	function readTunes(list, key) {
 		const out = {};
 		for (const c of list) {
 			const scope = get(c, key, 0), mob = get(c, 'Mob', '');
 			if (!mob || scope < 0) continue;
-			(out[scope] ??= {})[mob] = {
-				size: round2(get(c, 'Size', 1)), health: round2(get(c, 'Health', 1)), speed: round2(get(c, 'Speed', 1)),
-				damage: round2(get(c, 'Damage', 1)), gun: round2(get(c, 'Gun', 1)), grenade: round2(get(c, 'Grenade', 1)),
-				primary: get(c, 'Primary', ''), sidearm: get(c, 'Sidearm', ''),
-			};
+			(out[scope] ??= {})[mob] = readTune(c);
 		}
 		return out;
 	}
@@ -69,10 +73,7 @@ const Model = (() => {
 			for (const mob of Object.keys(tunes[scope]).sort()) {
 				const t = tunes[scope][mob];
 				if (isDefaultTune(t)) continue;
-				out.push({
-					[key]: N.int(scope), Mob: N.string(mob), Size: N.float(t.size), Health: N.float(t.health), Speed: N.float(t.speed),
-					Damage: N.float(t.damage), Gun: N.float(t.gun), Grenade: N.float(t.grenade), Primary: N.string(t.primary), Sidearm: N.string(t.sidearm),
-				});
+				out.push({[key]: N.int(scope), Mob: N.string(mob), ...tuneTags(t)});
 			}
 		}
 		return N.list(out);
@@ -255,7 +256,10 @@ const Model = (() => {
 				doc.spawns.push(spawn);
 			}
 			spawn.range = clamp(get(one, 'Range', spawn.range), LIMITS.spawnRange);
-			spawn.entries = items(one, 'Entries').map(e => ({mob: get(e, 'Mob', ''), count: clamp(get(e, 'Count', 1), LIMITS.spawnCount)}));
+			spawn.entries = items(one, 'Entries').map(e => {
+				const tuned = get(e, 'Tune', null);
+				return {mob: get(e, 'Mob', ''), count: clamp(get(e, 'Count', 1), LIMITS.spawnCount), ...(tuned ? {tune: readTune(tuned)} : {})};
+			});
 		}
 		for (const one of items(c, 'ColosseumRooms')) {
 			const room = doc.colosseums.find(r => r.x === get(one, 'X', 0) && r.y === get(one, 'Y', 0) && r.z === get(one, 'Z', 0));
@@ -274,7 +278,7 @@ const Model = (() => {
 		SafeRewards: N.ints(doc.safeRewards),
 		Spawns: N.list(doc.spawns.map(s => ({
 			X: N.int(s.x), Y: N.int(s.y), Z: N.int(s.z), Range: N.int(s.range),
-			Entries: N.list(s.entries.map(e => ({Mob: N.string(e.mob), Count: N.int(e.count)}))),
+			Entries: N.list(s.entries.map(e => ({Mob: N.string(e.mob), Count: N.int(e.count), ...(e.tune && !isDefaultTune(e.tune) ? {Tune: N.compound(tuneTags(e.tune))} : {})}))),
 			...(s.added ? {Added: N.int(1), Level: N.int(s.level), Room: N.int(s.room)} : {}),
 		}))),
 		ColosseumRooms: N.list(doc.colosseums.map(r => ({
