@@ -52,3 +52,29 @@ test('values read in the units the in-game page shows', () => {
 	assert.strictEqual(Conquest._show(at('TK_MG_MAG'), 60), '60 rounds');
 	assert.strictEqual(Conquest._show(at('BASE_DETECT'), 50), '50 m');
 });
+
+test('the Munitions page reads in its own units', () => {
+	assert.strictEqual(Conquest._show(at('MUN_GUN_PCT'), 30), '30% of shop');
+	assert.strictEqual(Conquest._show(at('MUN_JUGGERNAUT'), 3000), '3,000 g');
+});
+
+test('the guns file: numbers only in, sorted out, clamped to the game\'s limits', () => {
+	assert.ok(C.guns && C.guns.guns.length > 20, 'the gun catalog is built in');
+	const got = Conquest._parseGuns(JSON.stringify({guns: {'modern_warfare:m16a4': {damage: 30, fireRate: 1.5, note: 'x'}, 'modern_warfare:sks': {}}}));
+	assert.deepStrictEqual(got, {'modern_warfare:m16a4': {damage: 30, fireRate: 1.5}});
+	assert.deepStrictEqual(Conquest._parseGuns(''), {});
+	assert.throws(() => Conquest._parseGuns('{"v0": 1}'));
+	const S = Conquest._state;
+	S.guns = {};
+	Conquest._setGun('modern_warfare:m16a4', 'fireRate', 99);
+	Conquest._setGun('modern_warfare:m16a4', 'range', 20);
+	Conquest._setGun('modern_warfare:m16a4', 'fullRange', 50);
+	const m16 = S.guns['modern_warfare:m16a4'];
+	assert.strictEqual(m16.fireRate, C.guns.maxRate);
+	assert.strictEqual(m16.fullRange, 20, 'full-damage range kept within the range');
+	Conquest._setGun('modern_warfare:m16a4', 'fireRate', null);
+	assert.ok(!('fireRate' in m16) || S.guns['modern_warfare:m16a4'].fireRate == null);
+	assert.deepStrictEqual(JSON.parse(Conquest._writeGuns()).guns, S.guns);
+	const glock = C.guns.guns.find(g => g.id === 'modern_warfare:glock_17');
+	assert.strictEqual(Conquest._ownOf(glock, 'price'), Math.max(1, Math.round(glock.price * 0.3)));
+});

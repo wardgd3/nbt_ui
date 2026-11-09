@@ -540,3 +540,24 @@ input[type="range"] { width: 100%; accent-color: var(--ember); height: 18px; }
 	.cq-row { grid-template-columns: 8px minmax(110px, 1fr) minmax(100px, 1.4fr) 108px 0 28px; }
 	.cq-row output { display: none; }
 }
+
+/* Conquest: the Guns page */
+.cq-lead { margin: 12px 2px 0; color: var(--ink-3); font-size: 13px; max-width: 760px; }
+.cq-tag { font-style: normal; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ember); border: 1px solid #f0813a55; border-radius: 4px; padding: 1px 6px; }
+.cq-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--line-soft); background: #17130f; font-size: 12px; color: var(--ink-3); }
+.cq-bulk > span { font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 11px; margin-right: 2px; }
+.cq-bulk .cq-val { width: 150px; }
+.cq-guns { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; padding: 10px 12px 12px; border-top: 1px solid var(--line-soft); }
+.cq-gun { border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); padding: 8px 10px 10px; transition: background .6s; }
+.cq-gun.set { border-color: #5a4620; }
+.cq-gun.flash { background: var(--ember-soft); }
+.cq-gun-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.cq-gun-head b { font-size: 14px; }
+.cq-gun-head small { color: var(--ink-3); font-size: 11.5px; margin-right: auto; }
+.cq-gun-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin-top: 4px; }
+.cq-gf { display: flex; flex-direction: column; gap: 2px; font-size: 11.5px; color: var(--ink-3); min-width: 0; }
+.cq-gf .cq-val { height: 26px; }
+.cq-gf .cq-num::placeholder { color: #6f665d; }
+.cq-gf.set > span { color: var(--warn); }
+.cq-gf.set .cq-val { border-color: #5a4620; }
+.cq-gf.unsaved .cq-val { box-shadow: inset 3px 0 0 var(--ember); }

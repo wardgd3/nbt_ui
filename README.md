@@ -32,7 +32,17 @@ The Conquest tab edits the game's Conquest admin settings: every slider on the i
 - The right panel lists every change a save would make. Its **Economy** view shows turn income, what each price costs in income time, and how many reactors a shield needs.
 - **Free** is kept by the world, not the file, so it stays an in-game switch.
 
-`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java` and FightArenaMod's `ConquestAdminScreen.java` and lang file. After a slider is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
+### Guns
+
+The **Guns** page (after Munitions) adjusts every gun the shop sells, by tier. It is not on the in-game page: a Conquest world has no Guns section of its own.
+
+- **Per gun:** damage (the whole shot at the muzzle), range, full-damage range, fire rate, Full Auto rate where the gun has one, and recoil.
+- **Tier III guns** also get a Munitions Chest price in gold. Left blank, they cost the Munitions page's share of their shop price.
+- A blank box keeps the gun as built; the grey figure shows what that is. **Whole tier** sets damage, fire rate or recoil on every gun in a tier as a percent of each one as built.
+- Saved to `config/fight_arena_conquest_guns.json`. Fight Arena reads it in Conquest worlds when a world starts and whenever a player joins (`game/ConquestGuns.java`), over the world's own gun settings.
+- The gun list and each gun's own figures come from `config/fight_arena_conquest_guns.catalog.json`, which Fight Arena writes on every start. Load reads the game's copy; `npm run gen:conquest` builds one in.
+
+`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java`, FightArenaMod's `ConquestAdminScreen.java` and lang file, and the gun catalog. After a slider or gun is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
 
 ## Cloud
 

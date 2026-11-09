@@ -20,9 +20,13 @@ const Conquest = (() => {
 		side: 'changes',
 		loadedAt: null,
 		triedAuto: false,
+		guns: {}, // what is set on each gun, by item id: price (gold), damage, range, fullRange, fireRate, autoRate, recoil
+		gunsBase: null, // the guns file as last read or written
+		catalog: C.guns, // every gun and its own figures - the game's latest catalog once read from the folder
 	};
 	const undo = [], redo = [];
-	let last = JSON.stringify(S.values);
+	const snapshot = () => JSON.stringify({v: S.values, g: S.guns});
+	let last = snapshot();
 
 	// --- what each setting is ---
 
@@ -44,12 +48,13 @@ const Conquest = (() => {
 		if (BLOCKS.has(n)) return {k: 'm'};
 		if (n === 'BS_MISSILE_CAP') return {k: 'n'};
 		if (n === 'REACTOR_HP') return {k: 'hp'};
-		if (/^(PRICE_|REWARD_|UP_)/.test(n) || GOLD_ALSO.has(n)) return {k: 'gold'};
+		if (n === 'MUN_GUN_PCT' || n === 'MUN_AMMO_PCT') return {k: 'share'};
+		if (/^(PRICE_|REWARD_|UP_|MUN_)/.test(n) || GOLD_ALSO.has(n)) return {k: 'gold'};
 		if (n === 'SHIELD_COST' || n === 'REACTOR_RATE') return {k: 'mj'};
 		return {k: 'pct'};
 	}
 	const isPct = i => ['pct', 'zoom'].includes(kind(i).k);
-	const UNIT = {pct: '%', zoom: '±%', rounds: 'rounds', s: 's', mmss: 's', m: 'm', n: '', hp: 'HP', gold: 'g', mj: 'MJ/s'};
+	const UNIT = {pct: '%', zoom: '±%', rounds: 'rounds', s: 's', mmss: 's', m: 'm', n: '', hp: 'HP', gold: 'g', mj: 'MJ/s', share: '% of shop'};
 	const comma = n => Math.round(n).toLocaleString('en-US');
 	const mmss = v => `${Math.floor(Math.round(v) / 60)}:${String(Math.round(v) % 60).padStart(2, '0')}`;
 
@@ -66,6 +71,7 @@ const Conquest = (() => {
 			case 'hp': return `${comma(v)} HP`;
 			case 'gold': return `${comma(v)} g`;
 			case 'mj': return `${comma(v)} MJ/s`;
+			case 'share': return `${Math.round(v)}% of shop`;
 			default: return comma(v);
 		}
 	}
@@ -85,10 +91,97 @@ const Conquest = (() => {
 	const sectionIdx = sec => sec.sliders.filter(sl => sl.i != null).map(sl => sl.i);
 	const pageIdx = p => p.sections.flatMap(sectionIdx);
 
+	// --- the guns (Fight Arena's ConquestGuns: config/fight_arena_conquest_guns.json, and the catalog it writes) ---
+
+	const GUN_FILE = 'fight_arena_conquest_guns.json', CATALOG_FILE = 'fight_arena_conquest_guns.catalog.json';
+	/** The Guns page, after the in-game pages in the data. */
+	const GUN_PAGE = C.pages.length;
+	const TIER_NAMES = ['', 'Tier I', 'Tier II', 'Tier III', 'Tier IV', 'Tier V'];
+	const GFIELDS = [
+		{k: 'price', label: 'Munitions price', unit: 'g', munitions: true},
+		{k: 'damage', label: 'Damage', unit: 'a shot'},
+		{k: 'range', label: 'Range', unit: 'm'},
+		{k: 'fullRange', label: 'Full damage to', unit: 'm'},
+		{k: 'fireRate', label: 'Fire rate', unit: '%', rate: true},
+		{k: 'autoRate', label: 'Full Auto rate', unit: '%', rate: true, auto: true},
+		{k: 'recoil', label: 'Recoil', unit: '%', rate: true},
+	];
+	const GFIELD = Object.fromEntries(GFIELDS.map(f => [f.k, f]));
+	const cat = () => S.catalog || {guns: []};
+	const gunById = id => cat().guns.find(g => g.id === id);
+	const munTier = () => cat().munitionsTier || 3;
+	const isMun = g => g.tier === munTier();
+	const fieldsOf = g => GFIELDS.filter(f => (f.munitions ? isMun(g) : f.auto ? g.shoots && g.auto : g.shoots));
+	/** What a gun has before anything is set: its Munitions price is the Munitions page's share of its shop price. */
+	function ownOf(g, k) {
+		if (k === 'price') return Math.max(1, Math.round(g.price * val('MUN_GUN_PCT') / 100));
+		return k in g && !GFIELD[k].rate ? g[k] : 1;
+	}
+	const gunVal = (g, k) => S.guns[g.id]?.[k] ?? ownOf(g, k);
+	function gunLimits(g, k) {
+		const c = cat();
+		if (k === 'price') return [0, c.maxPrice || 1e6];
+		if (k === 'damage') return [0, c.maxDamage || 1e4];
+		if (k === 'range') return [1, c.maxRange || 512];
+		if (k === 'fullRange') return [0, gunVal(g, 'range')];
+		return [c.minRate || 0.25, c.maxRate || 3];
+	}
+	const gunShow = (k, v) => (k === 'price' ? `${comma(v)} g` : GFIELD[k].rate ? `${Math.round(v * 100)}%` : k === 'damage' ? String(+v.toFixed(2)) : `${+v.toFixed(1)} m`);
+	const gunToBox = (k, v) => (GFIELD[k].rate ? +(v * 100).toFixed(1) : +v.toFixed(2));
+	const gunFromBox = (k, n) => (GFIELD[k].rate ? n / 100 : n);
+	function setGun(id, k, v) {
+		const g = gunById(id);
+		if (v == null) {
+			if (S.guns[id]) delete S.guns[id][k];
+		} else {
+			const [lo, hi] = gunLimits(g, k);
+			v = tidy(Math.min(hi, Math.max(lo, v)));
+			if (k === 'price') v = Math.round(v);
+			S.guns[id] = {...S.guns[id], [k]: v};
+			// a range brought under its full-damage range takes that down with it
+			if (k === 'range' && S.guns[id].fullRange > v) S.guns[id].fullRange = v;
+		}
+		if (S.guns[id] && !Object.keys(S.guns[id]).length) delete S.guns[id];
+	}
+	/** Each gun figure that differs from the game's guns file, as {id, k}. */
+	function gunPending() {
+		const base = S.gunsBase || {}, out = [];
+		for (const id of new Set([...Object.keys(S.guns), ...Object.keys(base)])) {
+			for (const k of new Set([...Object.keys(S.guns[id] || {}), ...Object.keys(base[id] || {})])) {
+				const a = S.guns[id]?.[k], b = base[id]?.[k];
+				if (a == null ? b != null : b == null || !same(a, b)) out.push({id, k});
+			}
+		}
+		return out;
+	}
+	const gunsSet = () => Object.values(S.guns).reduce((n, o) => n + Object.keys(o).length, 0);
+	const unsavedCount = () => pending().length + gunPending().length;
+
+	/** A guns file as the game reads it: only numbers, by gun. */
+	function parseGuns(text) {
+		if (!text || !text.trim()) return {};
+		const o = JSON.parse(text);
+		if (!o || typeof o.guns !== 'object' || Array.isArray(o.guns)) throw new Error('not a guns file');
+		const out = {};
+		for (const [id, fields] of Object.entries(o.guns)) {
+			if (!fields || typeof fields !== 'object') continue;
+			const keep = {};
+			for (const f of GFIELDS) if (typeof fields[f.k] === 'number') keep[f.k] = fields[f.k];
+			if (Object.keys(keep).length) out[id] = keep;
+		}
+		return out;
+	}
+
+	function writeGuns() {
+		const guns = {};
+		for (const id of Object.keys(S.guns).sort()) guns[id] = S.guns[id];
+		return JSON.stringify({guns}, null, 2);
+	}
+
 	// --- history and draft ---
 
 	function commit() {
-		const now = JSON.stringify(S.values);
+		const now = snapshot();
 		if (now === last) return;
 		undo.push(last);
 		if (undo.length > 300) undo.shift();
@@ -102,14 +195,15 @@ const Conquest = (() => {
 		if (!from.length) return A.toast(`Nothing to ${word}`);
 		to.push(last);
 		last = from.pop();
-		S.values = JSON.parse(last);
+		({v: S.values, g: S.guns} = JSON.parse(last));
 		saveDraft();
 		A.render();
 	}
 
 	function saveDraft() {
 		try {
-			localStorage.setItem(DRAFT, JSON.stringify({values: S.values, base: S.base, baseText: S.baseText, extra: S.extra, page: S.page, open: [...S.open], loadedAt: S.loadedAt}));
+			localStorage.setItem(DRAFT, JSON.stringify({values: S.values, base: S.base, baseText: S.baseText, extra: S.extra, page: S.page, open: [...S.open], loadedAt: S.loadedAt,
+				guns: S.guns, gunsBase: S.gunsBase, catalog: S.catalog === C.guns ? null : S.catalog}));
 		} catch { /* no storage: the tab works without a draft */ }
 	}
 
@@ -121,10 +215,13 @@ const Conquest = (() => {
 			if (Array.isArray(d.base)) S.base = C.def.map((v, i) => (Number.isFinite(d.base[i]) ? d.base[i] : v));
 			S.baseText = d.baseText || null;
 			S.extra = d.extra || {};
-			S.page = Math.min(C.pages.length - 1, d.page || 0);
+			S.page = Math.min(C.pages.length, d.page || 0);
+			S.guns = d.guns && typeof d.guns === 'object' ? d.guns : {};
+			S.gunsBase = d.gunsBase || null;
+			if (d.catalog?.guns) S.catalog = d.catalog;
 			S.open = new Set(d.open || []);
 			S.loadedAt = d.loadedAt || null;
-			last = JSON.stringify(S.values);
+			last = snapshot();
 		} catch { /* a draft that cannot be read is passed over */ }
 	}
 
@@ -153,10 +250,20 @@ const Conquest = (() => {
 		return JSON.stringify(o, null, 2);
 	}
 
-	async function fileHandle(create) {
+	async function fileHandle(create, name = FILE) {
 		const {folder} = A.folder();
 		const config = await folder.getDirectoryHandle('config', {create});
-		return config.getFileHandle(FILE, {create});
+		return config.getFileHandle(name, {create});
+	}
+
+	/** A config file's text, or null where there is none. */
+	async function readOptional(name) {
+		try {
+			return await (await (await fileHandle(false, name)).getFile()).text();
+		} catch (e) {
+			if (e.name === 'NotFoundError') return null;
+			throw e;
+		}
 	}
 
 	/** The game folder linked and allowed, asking for it if need be. */
@@ -171,19 +278,21 @@ const Conquest = (() => {
 		return {text: await file.text(), time: file.lastModified};
 	}
 
-	function take(text, from) {
+	function take(text, from, guns) {
 		const got = parse(text);
 		commit();
 		S.values = got.values;
 		S.base = got.values.slice();
 		S.baseText = text;
 		S.extra = got.extra;
+		S.guns = JSON.parse(JSON.stringify(guns));
+		S.gunsBase = JSON.parse(JSON.stringify(guns));
 		S.loadedAt = Date.now();
 		commit();
 		saveDraft();
 		A.render();
-		const changed = got.values.filter((v, i) => !same(v, C.def[i])).length;
-		A.toast(`${from}: ${changed} setting${changed === 1 ? '' : 's'} differ from the defaults${got.known < C.count ? ` · ${C.count - got.known} not in the file yet, at their defaults` : ''}`, 'good');
+		const changed = got.values.filter((v, i) => !same(v, C.def[i])).length, g = gunsSet();
+		A.toast(`${from}: ${changed} setting${changed === 1 ? '' : 's'} differ from the defaults${g ? ` · ${g} gun figure${g === 1 ? '' : 's'} set` : ''}${got.known < C.count ? ` · ${C.count - got.known} not in the file yet, at their defaults` : ''}`, 'good');
 	}
 
 	async function loadGame(quiet) {
@@ -191,21 +300,38 @@ const Conquest = (() => {
 			if (!quiet && !A.hasFolderApi()) importFile();
 			return;
 		}
-		let text;
+		let text, gunsText, catalog;
 		try {
-			({text} = await readGame());
+			text = await readOptional(FILE);
+			gunsText = await readOptional(GUN_FILE);
+			catalog = await readOptional(CATALOG_FILE);
 		} catch (e) {
-			if (!quiet) A.toast(e.name === 'NotFoundError' ? `No config/${FILE} in ${A.folder().folder.name} yet: the game writes it the first time a world starts. Saving here makes it.` : `Could not read the game's settings: ${e.message}`, 'bad');
+			if (!quiet) A.toast(`Could not read the game's settings: ${e.message}`, 'bad');
 			return;
 		}
-		const mine = pending().length;
+		try {
+			const c = catalog && JSON.parse(catalog);
+			if (c?.guns?.length) S.catalog = c;
+		} catch { /* a catalog that cannot be read: the one built in stays */ }
+		if (text == null) {
+			if (!quiet) A.toast(`No config/${FILE} in ${A.folder().folder.name} yet: the game writes it the first time a world starts. Saving here makes it.`, 'bad');
+			text = '{}';
+		}
+		let guns;
+		try {
+			guns = parseGuns(gunsText);
+		} catch (e) {
+			if (!quiet) A.toast(`config/${GUN_FILE} could not be read (${e.message}); the guns start empty`, 'bad');
+			guns = {};
+		}
+		const mine = unsavedCount();
 		if (!quiet && mine && text !== S.baseText) {
 			const ok = await A.ask('Load the game\'s settings?', `You have ${mine} change${mine === 1 ? '' : 's'} not yet saved to the game. Loading puts every setting back to what the game's file has.`,
 				[['Cancel', false], ['Load and lose them', true, 'primary']]);
 			if (!ok) return;
 		}
-		if (quiet && mine) return; // a draft with changes in it is never overwritten unasked
-		take(text, `Loaded from ${A.folder().folder.name}`);
+		if (quiet && mine) return A.render(); // a draft with changes in it is never overwritten unasked
+		take(text, `Loaded from ${A.folder().folder.name}`, guns);
 	}
 
 	async function saveGame() {
@@ -241,27 +367,39 @@ const Conquest = (() => {
 			const out = await (await fileHandle(true)).createWritable();
 			await out.write(text);
 			await out.close();
-			const n = S.base ? pending().length : S.values.filter((v, i) => changedFromDefault(i)).length;
+			const gunsChanged = gunPending().length;
+			if (gunsChanged || (S.gunsBase == null && gunsSet())) {
+				const g = await (await fileHandle(true, GUN_FILE)).createWritable();
+				await g.write(writeGuns());
+				await g.close();
+			}
+			const n = (S.base ? pending().length : S.values.filter((v, i) => changedFromDefault(i)).length) + gunsChanged;
 			S.base = S.values.slice();
 			S.baseText = text;
+			S.gunsBase = JSON.parse(JSON.stringify(S.guns));
 			S.loadedAt = Date.now();
 			saveDraft();
 			A.render();
-			A.toast(`Saved to ${A.folder().folder.name}/config/${FILE}${n ? ` · ${n} change${n === 1 ? '' : 's'}` : ''}. The game picks it up when a world starts or a player joins.`, 'good');
+			A.toast(`Saved to ${A.folder().folder.name}/config/${FILE}${n ? ` · ${n} change${n === 1 ? '' : 's'}` : ''}${gunsChanged ? ` and config/${GUN_FILE}` : ''}. The game picks it up when a world starts or a player joins.`, 'good');
 		} catch (e) {
 			if (e.name !== 'AbortError') A.toast(`Could not save: ${e.message}`, 'bad');
 		}
 	}
 
-	function exportFile() {
-		commit();
-		const url = URL.createObjectURL(new Blob([write()], {type: 'application/json'}));
-		const a = A.h('a', {href: url, download: FILE});
+	function download(name, text) {
+		const url = URL.createObjectURL(new Blob([text], {type: 'application/json'}));
+		const a = A.h('a', {href: url, download: name});
 		document.body.append(a);
 		a.click();
 		a.remove();
 		setTimeout(() => URL.revokeObjectURL(url), 2000);
-		A.toast(`Downloaded ${FILE}. Put it in the game folder's config folder.`);
+	}
+
+	function exportFile() {
+		commit();
+		download(FILE, write());
+		if (gunsSet()) download(GUN_FILE, writeGuns());
+		A.toast(`Downloaded ${FILE}${gunsSet() ? ` and ${GUN_FILE}` : ''}. Put them in the game folder's config folder.`);
 	}
 
 	function importFile() {
@@ -275,7 +413,16 @@ const Conquest = (() => {
 	/** A settings file dropped or picked: its values in, as changes to save (the game's file stays what it is). */
 	async function drop(file) {
 		try {
-			const got = parse(await file.text());
+			const text = await file.text();
+			if (/"guns"\s*:/.test(text) && !/"v0"\s*:/.test(text)) {
+				const guns = parseGuns(text);
+				commit();
+				S.guns = guns;
+				commit();
+				A.render();
+				return A.toast(`Opened ${file.name}: ${gunsSet()} gun figure${gunsSet() === 1 ? '' : 's'}, not saved yet`, 'good');
+			}
+			const got = parse(text);
 			commit();
 			S.values = got.values;
 			for (const [k, v] of Object.entries(got.extra)) if (k !== 'brMgBare') S.extra[k] = v;
@@ -311,14 +458,14 @@ const Conquest = (() => {
 		A.renderRail();
 		A.renderTop();
 		A.renderPalette();
-		document.querySelectorAll('.cq-sec').forEach(paintSection);
-		document.querySelector('.cq-head')?.replaceWith(pageHead());
+		document.querySelectorAll('.cq-sec:not(.cq-gunsec)').forEach(paintSection);
+		document.querySelector('.cq-head')?.replaceWith(S.page === GUN_PAGE ? gunsHead() : pageHead());
 	}
 
 	// --- top bar ---
 
 	function top() {
-		const n = pending().length, {folder, live} = A.folder();
+		const n = unsavedCount(), {folder, live} = A.folder();
 		const where = !A.hasFolderApi() ? 'Downloads (no folder access in this browser)' : !folder ? 'No game folder linked' : !live ? `Reconnect ${folder.name}` : S.base ? `${folder.name}/config/${FILE}` : `${folder.name} · not loaded yet`;
 		return [
 			A.h('button', {type: 'button', class: 'file cq-file', title: S.loadedAt ? `Last read or written ${new Date(S.loadedAt).toLocaleString()}` : 'Where the game keeps the Conquest settings',
@@ -342,7 +489,9 @@ const Conquest = (() => {
 				onkeydown: e => { if (e.key === 'Escape') { S.query = ''; e.target.blur(); A.render(); } }}),
 			A.h('kbd', {}, '/')),
 			A.h('p', {}, S.query ? A.h('span', {}, A.h('b', {}, String(matches().length)), ' matching') : `${C.count} settings · ${S.values.filter((v, i) => changedFromDefault(i)).length} off their defaults`));
-		const pages = C.pages.map((p, pi) => {
+		const pages = ORDER.map(pi => {
+			if (pi === GUN_PAGE) return gunsRail();
+			const p = C.pages[pi];
 			const idx = pageIdx(p), off = idx.filter(changedFromDefault).length, mine = idx.filter(i => S.base && unsaved(i)).length;
 			const on = pi === S.page && !S.query;
 			return [
@@ -359,6 +508,41 @@ const Conquest = (() => {
 			A.h('div', {class: 'rail-head'}, A.h('span', {class: 'eyebrow'}, 'Admin pages'),
 				A.h('button', {type: 'button', class: 'chip', 'aria-pressed': String(S.onlyChanged), title: 'Show only settings off their defaults', onclick: () => { S.onlyChanged = !S.onlyChanged; A.render(); }}, 'Changed')),
 			A.h('div', {class: 'scroll'}, pages)];
+	}
+
+	/** The rail's pages in order: the in-game ones, the Guns page after Munitions. */
+	const ORDER = (() => {
+		const order = C.pages.map((p, pi) => pi), at = C.pages.findIndex(p => p.key === 'munitions');
+		order.splice(at >= 0 ? at + 1 : order.length, 0, GUN_PAGE);
+		return order;
+	})();
+
+	function gunsRail() {
+		const on = S.page === GUN_PAGE && !S.query, set = Object.keys(S.guns).length, mine = gunPending().length;
+		const tiers = [...new Set(cat().guns.map(g => g.tier))].sort();
+		return [
+			A.h('button', {type: 'button', class: 'cq-page', 'aria-current': String(on), onclick: () => goPage(GUN_PAGE)},
+				A.h('span', {}, 'Guns'), set ? A.h('small', {title: `${set} gun${set === 1 ? '' : 's'} adjusted`}, String(set)) : A.h('small'), mine ? A.h('i', {class: 'mark', title: `${mine} not saved to the game`}) : A.h('i')),
+			on ? A.h('div', {class: 'cq-secs'}, tiers.map(t => {
+				const n = cat().guns.filter(g => g.tier === t && S.guns[g.id]).length, m = gunPending().some(x => gunById(x.id)?.tier === t);
+				return A.h('button', {type: 'button', class: 'cq-secrow', onclick: () => jumpTier(t)}, A.h('span', {}, `${TIER_NAMES[t]}${t === munTier() ? ' · Munitions' : ''}`),
+					A.h('small', {}, n ? String(n) : ''), m ? A.h('i', {class: 'mark'}) : A.h('i'));
+			})) : null,
+		];
+	}
+
+	const tierOpen = t => S.open.has(`gtier${t}`) !== (t === munTier());
+	function jumpTier(t) {
+		S.page = GUN_PAGE;
+		S.query = '';
+		if (!tierOpen(t)) toggleTier(t);
+		saveDraft();
+		A.render();
+		document.querySelector(`.cq-sec[data-key="gtier${t}"]`)?.scrollIntoView({block: 'start', behavior: 'smooth'});
+	}
+	function toggleTier(t) {
+		const k = `gtier${t}`;
+		S.open.has(k) ? S.open.delete(k) : S.open.add(k);
 	}
 
 	function goPage(pi) {
@@ -393,6 +577,14 @@ const Conquest = (() => {
 		return out;
 	}
 
+	function gunMatches() {
+		const words = S.query.toLowerCase().split(/\s+/).filter(Boolean);
+		return cat().guns.filter(g => {
+			const hay = `guns gun ${g.name} ${g.id} ${TIER_NAMES[g.tier]} tier ${g.tier} ${isMun(g) ? 'munitions price' : ''} ${g.shoots ? 'damage range fire rate recoil' : ''}`.toLowerCase();
+			return words.every(w => hay.includes(w)) && (!S.onlyChanged || S.guns[g.id]);
+		});
+	}
+
 	function editor() {
 		if (S.query) {
 			const found = matches();
@@ -402,12 +594,15 @@ const Conquest = (() => {
 				if (!groups.has(k)) groups.set(k, []);
 				groups.get(k).push(m.i);
 			}
-			return [A.h('div', {class: 'ed-head'}, A.h('div', {}, A.h('h1', {}, `“${S.query}”`), A.h('div', {class: 'sub'}, `${found.length} setting${found.length === 1 ? '' : 's'} across ${groups.size} section${groups.size === 1 ? '' : 's'}`))),
-				A.h('div', {class: 'scroll cq-body'}, found.length ? [...groups].map(([k, list]) => {
+			const guns = gunMatches();
+			return [A.h('div', {class: 'ed-head'}, A.h('div', {}, A.h('h1', {}, `“${S.query}”`), A.h('div', {class: 'sub'}, `${found.length} setting${found.length === 1 ? '' : 's'} across ${groups.size} section${groups.size === 1 ? '' : 's'}${guns.length ? ` · ${guns.length} gun${guns.length === 1 ? '' : 's'}` : ''}`))),
+				A.h('div', {class: 'scroll cq-body'}, found.length || guns.length ? [...[...groups].map(([k, list]) => {
 					const [pi, si] = k.split(':').map(Number), sec = C.pages[pi].sections[si];
 					return section(sec, list, `${C.pages[pi].label} › ${sec.label}`, true);
-				}) : A.h('p', {class: 'empty'}, A.h('b', {}, 'Nothing matches'), 'Try a vehicle, a weapon or a word like price, range or damage.'))];
+				}), guns.length ? A.h('section', {class: 'cq-sec cq-gunsec open'}, A.h('header', {}, A.h('div', {class: 'cq-fold'}, A.h('h2', {}, 'Guns'))), A.h('div', {class: 'cq-guns'}, guns.map(gunCard))) : null]
+					: A.h('p', {class: 'empty'}, A.h('b', {}, 'Nothing matches'), 'Try a vehicle, a gun, or a word like price, range or damage.'))];
 		}
+		if (S.page === GUN_PAGE) return gunsEditor();
 		const p = C.pages[S.page];
 		const body = p.sections.map(sec => {
 			const list = sectionIdx(sec).filter(i => !S.onlyChanged || changedFromDefault(i));
@@ -514,6 +709,120 @@ const Conquest = (() => {
 		el.querySelector('.cq-dot').title = was || 'Not saved to the game yet';
 	}
 
+	// --- the Guns page ---
+
+	function gunsHead() {
+		const guns = cat().guns, set = Object.keys(S.guns).length, tiers = [...new Set(guns.map(g => g.tier))];
+		const allOpen = tiers.every(tierOpen);
+		return A.h('div', {class: 'ed-head cq-head'},
+			A.h('div', {}, A.h('h1', {}, 'Guns'), A.h('div', {class: 'sub'}, `${guns.length} guns in ${tiers.length} tiers · ${TIER_NAMES[munTier()]} sold in the Munitions Chest`,
+				set ? [' · ', A.h('b', {}, `${set} adjusted`)] : ' · all as built')),
+			A.h('div', {class: 'bar'},
+				A.h('button', {type: 'button', class: 'btn small ghost', onclick: () => {
+					for (const t of tiers) if (tierOpen(t) === allOpen) toggleTier(t);
+					saveDraft();
+					A.renderEditor();
+				}}, allOpen ? 'Collapse all' : 'Expand all'),
+				set ? A.btn('reset', 'Put every gun back as built', async () => {
+					if (await A.ask('Reset every gun?', `All ${set} adjusted gun${set === 1 ? '' : 's'} go back to as built. Undo brings them back.`, [['Cancel', false], ['Reset', true, 'primary']])) {
+						S.guns = {};
+						commit();
+						A.render();
+					}
+				}, {class: 'small ghost danger', text: 'Reset guns'}) : null));
+	}
+
+	function gunsEditor() {
+		if (!cat().guns.length) {
+			return [gunsHead(), A.h('div', {class: 'scroll cq-body'}, A.h('p', {class: 'empty'}, A.h('b', {}, 'No gun list yet'),
+				`Start the game once with the current Fight Arena, then Load: it writes config/${CATALOG_FILE} with every gun.`))];
+		}
+		const tiers = [...new Set(cat().guns.map(g => g.tier))].sort();
+		return [gunsHead(), A.h('div', {class: 'scroll cq-body'},
+			A.h('p', {class: 'cq-lead'}, 'These hold in every Conquest world, over the world\'s own gun settings. A blank box keeps the gun as built; the grey figure is what that is. Damage is the whole shot at the muzzle.'),
+			tiers.map(t => tierSection(t)))];
+	}
+
+	function tierSection(t) {
+		const guns = cat().guns.filter(g => g.tier === t && (!S.onlyChanged || S.guns[g.id])), open = tierOpen(t) || S.onlyChanged;
+		if (S.onlyChanged && !guns.length) return null;
+		const set = guns.filter(g => S.guns[g.id]).length, mine = new Set(gunPending().map(x => x.id)), unsavedHere = guns.filter(g => mine.has(g.id)).length;
+		const shooters = guns.filter(g => g.shoots);
+		const scale = {};
+		const bulk = shooters.length ? A.h('div', {class: 'cq-bulk'}, A.h('span', {}, 'Whole tier'),
+			[['damage', 'Damage'], ['fireRate', 'Fire rate'], ['recoil', 'Recoil']].map(([k, name]) => A.h('label', {class: 'cq-val'},
+				A.h('input', {type: 'number', class: 'cq-num', placeholder: '100', step: 'any', 'aria-label': `${name} for the whole tier, percent of as built`, oninput: e => { scale[k] = e.target.value; }}),
+				A.h('span', {}, `% ${name.toLowerCase()}`))),
+			A.h('button', {type: 'button', class: 'btn small', title: 'Set these on every gun in the tier, as a percent of each one as built', onclick: () => {
+				let n = 0;
+				for (const [k, raw] of Object.entries(scale)) {
+					const pct = parseFloat(raw);
+					if (!Number.isFinite(pct)) continue;
+					for (const g of shooters) setGun(g.id, k, k === 'damage' ? g.damage * pct / 100 : pct / 100);
+					n++;
+				}
+				if (!n) return A.toast('Type a percent first');
+				commit();
+				A.render();
+			}}, 'Apply')) : null;
+		return A.h('section', {class: `cq-sec cq-gunsec${open ? ' open' : ''}`, 'data-key': `gtier${t}`},
+			A.h('header', {},
+				A.h('button', {type: 'button', class: 'cq-fold', 'aria-expanded': String(open), disabled: S.onlyChanged, onclick: () => { toggleTier(t); saveDraft(); A.renderEditor(); }},
+					S.onlyChanged ? null : A.h('span', {class: 'cq-caret'}, '›'), A.h('h2', {}, TIER_NAMES[t]),
+					t === munTier() ? A.h('em', {class: 'cq-tag'}, 'Munitions Chest') : null,
+					A.h('span', {class: 'cq-sum'}, [open ? null : `${guns.length} guns`, set ? A.h('b', {}, `${set} adjusted`) : null, unsavedHere ? A.h('em', {}, `${unsavedHere} unsaved`) : null]
+						.filter(Boolean).flatMap((x, k) => (k ? [' · ', x] : [x])))),
+				set ? A.h('button', {type: 'button', class: 'btn small ghost danger', title: 'Put this tier\'s guns back as built', onclick: () => {
+					for (const g of guns) delete S.guns[g.id];
+					commit();
+					A.render();
+				}}, 'Reset') : null),
+			open ? [bulk, A.h('div', {class: 'cq-guns'}, guns.map(gunCard))] : null);
+	}
+
+	function gunCard(g) {
+		const fields = fieldsOf(g), mine = new Set(gunPending().filter(x => x.id === g.id).map(x => x.k));
+		const el = A.h('div', {class: `cq-gun${S.guns[g.id] ? ' set' : ''}`, 'data-gun': g.id},
+			A.h('div', {class: 'cq-gun-head'},
+				A.h('b', {}, g.name), A.h('small', {}, `${TIER_NAMES[g.tier]}${isMun(g) ? ' · Munitions' : ''}${g.shoots ? '' : ' · launcher'}`),
+				S.guns[g.id] ? A.h('button', {type: 'button', class: 'btn small icon ghost', title: 'Back to as built', 'aria-label': `Put ${g.name} back as built`, onclick: () => {
+					delete S.guns[g.id];
+					commit();
+					A.render();
+				}}, A.icon('reset')) : null),
+			fields.length ? A.h('div', {class: 'cq-gun-fields'}, fields.map(f => {
+				const has = S.guns[g.id]?.[f.k] != null;
+				const box = A.h('input', {type: 'number', class: 'cq-num', step: 'any', 'data-k': `gun:${g.id}:${f.k}`, placeholder: String(gunToBox(f.k, ownOf(g, f.k))),
+					value: has ? gunToBox(f.k, S.guns[g.id][f.k]) : '', 'aria-label': `${g.name} ${f.label}`,
+					onchange: e => {
+						const raw = e.target.value.trim(), n = parseFloat(raw);
+						setGun(g.id, f.k, raw === '' || !Number.isFinite(n) ? null : gunFromBox(f.k, n));
+						commit();
+						const fresh = gunCard(g);
+						el.replaceWith(fresh);
+						refresh();
+					}});
+				return A.h('label', {class: `cq-gf${has ? ' set' : ''}${mine.has(f.k) ? ' unsaved' : ''}`, title: `As built: ${gunShow(f.k, ownOf(g, f.k))}${f.munitions ? ' (the Munitions page\'s share of its shop price)' : ''}`},
+					A.h('span', {}, f.label), A.h('div', {class: 'cq-val'}, box, A.h('span', {}, f.unit)));
+			})) : A.h('p', {class: 'cq-note'}, 'A launcher: only its price can be set, and it is not sold in the Munitions Chest.'));
+		return el;
+	}
+
+	function revealGun(id) {
+		const g = gunById(id);
+		if (!g) return;
+		S.query = '';
+		S.page = GUN_PAGE;
+		if (!tierOpen(g.tier)) toggleTier(g.tier);
+		A.render();
+		const el = document.querySelector(`.cq-gun[data-gun="${id}"]`);
+		if (el) {
+			el.scrollIntoView({block: 'center', behavior: 'smooth'});
+			el.classList.add('flash');
+			setTimeout(() => el.classList.remove('flash'), 1200);
+		}
+	}
+
 	function freeCard(sec) {
 		return A.h('section', {class: 'cq-sec open cq-free'}, A.h('header', {}, A.h('div', {class: 'cq-fold'}, A.h('h2', {}, sec.label))),
 			A.h('div', {class: 'cq-note'}, A.h('b', {}, 'Free'), ' makes everything in the command interface free and unlimited. The world keeps it, not the settings file, so it is switched in the game: ',
@@ -546,6 +855,24 @@ const Conquest = (() => {
 			S.base && list.length ? A.h('div', {class: 'bar', style: 'margin-top:8px'},
 				A.btn('save', 'Save to game', saveGame, {class: 'small primary', text: 'Save to game'}),
 				A.h('button', {type: 'button', class: 'btn small ghost danger', onclick: () => resetTo(list, S.base)}, 'Discard all')) : null));
+		const gunList = gunPending();
+		if (gunList.length) {
+			const base = S.gunsBase || {};
+			out.push(A.h('div', {class: 'cq-card'}, A.h('h3', {}, `${gunList.length} gun figure${gunList.length === 1 ? '' : 's'} to save`),
+				A.h('div', {class: 'cq-changes'}, gunList.map(({id, k}) => {
+					const g = gunById(id), before = base[id]?.[k], now = S.guns[id]?.[k];
+					const word = v => (v == null ? (g ? `built ${gunShow(k, ownOf(g, k))}` : 'as built') : gunShow(k, v));
+					return A.h('div', {class: 'cq-change'},
+						A.h('button', {type: 'button', class: 'link', onclick: () => revealGun(id)}, A.h('span', {}, `${g?.name || id} · ${GFIELD[k].label}`), A.h('small', {}, g ? `Guns › ${TIER_NAMES[g.tier]}` : 'Not in the gun list')),
+						A.h('span', {class: 'cq-delta'}, A.h('s', {}, word(before)), ' → ', A.h('b', {}, word(now))),
+						A.h('button', {type: 'button', class: 'btn small icon ghost', title: 'Back to the game\'s', 'aria-label': 'Undo this change', onclick: () => {
+							setGun(id, k, before ?? null);
+							commit();
+							A.render();
+						}}, A.icon('close')));
+				})),
+				A.btn('save', 'Save to game', saveGame, {class: 'small primary', text: 'Save to game'})));
+		}
 		const offAll = S.values.map((v, i) => i).filter(changedFromDefault);
 		if (offAll.length) out.push(A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Defaults'),
 			A.h('p', {}, `${offAll.length} of ${C.count} settings are off the mod's defaults.`),
@@ -596,8 +923,18 @@ const Conquest = (() => {
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Power'),
 				A.h('p', {}, reactor > 0 ? `A base shield (${comma(shield)} MJ/s) takes ${(shield / reactor).toFixed(1)} reactor${shield / reactor === 1 ? '' : 's'} at ${comma(reactor)} MJ/s each.` : 'Reactors make no power.')),
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'What things cost'), A.h('p', {class: 'cq-hint'}, 'Price, then how long the turn income takes to pay for it.'), table(costs, 'Time to earn')),
+			munGunsCard(perSec),
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'What kills earn'), A.h('p', {class: 'cq-hint'}, 'Reward, then the turn income it equals.'), table(rewards, 'Turn income it equals')),
 		];
+	}
+
+	function munGunsCard(perSec) {
+		const guns = cat().guns.filter(isMun).map(g => ({g, price: gunVal(g, 'price')})).sort((a, b) => b.price - a.price);
+		if (!guns.length) return null;
+		return A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Munitions Chest guns'), A.h('p', {class: 'cq-hint'}, `${TIER_NAMES[munTier()]}, at their Munitions price, and the turn income it takes.`),
+			A.h('div', {class: 'cq-econ'}, guns.map(({g, price}) => A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => revealGun(g.id)},
+				A.h('span', {}, g.name, A.h('small', {}, S.guns[g.id]?.price != null ? 'price set' : `${Math.round(val('MUN_GUN_PCT'))}% of shop`)),
+				A.h('b', {}, `${comma(price)} g`), A.h('em', {}, perSec > 0 ? span(price / perSec) : '—')))));
 	}
 
 	function foot() {
@@ -621,8 +958,9 @@ const Conquest = (() => {
 		if (ctrl && key === 'k') { e.preventDefault(); document.querySelector('[data-k="cq-search"]')?.focus(); return; }
 		if (typing || ctrl || e.altKey) return;
 		if (e.key === '/') { e.preventDefault(); document.querySelector('[data-k="cq-search"]')?.focus(); return; }
-		if (e.key === '[') goPage((S.page - 1 + C.pages.length) % C.pages.length);
-		if (e.key === ']') goPage((S.page + 1) % C.pages.length);
+		const at = ORDER.indexOf(S.page);
+		if (e.key === '[') goPage(ORDER[(at - 1 + ORDER.length) % ORDER.length]);
+		if (e.key === ']') goPage(ORDER[(at + 1) % ORDER.length]);
 	}
 
 	/** The tab opened: the game's settings read straight away if the folder is linked and nothing here is unsaved. */
@@ -640,7 +978,7 @@ const Conquest = (() => {
 		},
 		top, rail, editor, side, foot, keys, drop, opened, commit,
 		// for the tests
-		_parse: parse, _show: show, _state: S, _write: write,
+		_parse: parse, _show: show, _state: S, _write: write, _parseGuns: parseGuns, _writeGuns: writeGuns, _setGun: setGun, _ownOf: ownOf,
 	};
 })();
 if (typeof module !== 'undefined') module.exports = Conquest;
