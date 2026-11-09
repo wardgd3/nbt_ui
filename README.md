@@ -20,6 +20,20 @@ A single page app for making the game's `.nbt` files. Double-click `index.html`,
 
 The Map tab shows Levels 1 to 3 of the Temple from above, with the roof off, in the order players walk them. Scroll to zoom, drag to move, and click a room for its details. A Mob Spawn in the details, or a colosseum's Edit button, opens it in the Temple tab. The Mob Spawns and their mobs come from the Temple file you are working on.
 
+## Conquest
+
+The Conquest tab edits the game's Conquest admin settings: every slider on the in-game Conquest admin page, laid out by the same pages (Vehicles, Rewards, Base, Ordnance, Admin) and sections. The game keeps them in the instance's `config/modern_warfare_ships.json`, which the tab reads and writes directly. That file name is fixed, so this is the one save with no Save dialog.
+
+- **Load** reads the file from the linked game folder. The tab also reads it on its own when you open it, if nothing here is unsaved.
+- **Save** (`Ctrl+S`) writes it back. If an admin changed sliders in game since you loaded, it lists those changes and keeps them unless you overwrite them.
+- The game reads the file when a world starts and whenever a player joins, so a running world picks a save up on the next join.
+- **Import** and **Export** open or download a settings `.json`. Without a linked folder, Save downloads it.
+- Each row has a slider, an exact number box, a tick at the default and a reset button. `/` searches every setting, and **Changed** shows only settings off their defaults.
+- The right panel lists every change a save would make. Its **Economy** view shows turn income, what each price costs in income time, and how many reactors a shield needs.
+- **Free** is kept by the world, not the file, so it stays an in-game switch.
+
+`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java` and FightArenaMod's `ConquestAdminScreen.java` and lang file. After a slider is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
+
 ## Cloud
 
 Click **Cloud** and sign in with Google, using `npm start` (sign-in cannot come back to a page opened from disk). Save then also copies the file to the cloud, and Cloud lists, opens and deletes your files of the current kind. The game still reads files from its own folders, so a file opened from the cloud needs a Save to reach the game.

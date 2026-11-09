@@ -7,7 +7,7 @@
 	const FACTION_NAMES = {undead: 'Undead', orcs: 'Orcs', beasts: 'Beasts', dark: 'Dark Order', giants: 'Giants', demons: 'Demons', dragons: 'Dragons',
 		insurgents: 'Insurgents', light: 'Light side', vanilla: 'Vanilla'};
 	const GROUP_COLORS = ['#f0813a', '#58b0d1', '#8dbb6f', '#a585e0', '#e9b44c', '#e26aa2', '#4fc1a6', '#d17f4e', '#7f9be8', '#c9c262', '#e8604f', '#8d97a3', '#b6946c', '#c58be0', '#68c4e0'];
-	const MODES = [['waves', 'Waves'], ['colosseum', 'Colosseum'], ['temple', 'Temple'], ['map', 'Map']];
+	const MODES = [['waves', 'Waves'], ['colosseum', 'Colosseum'], ['temple', 'Temple'], ['map', 'Map'], ['conquest', 'Conquest']];
 	const LEVELS = [[1, 'Level 1'], [2, 'Level 2'], [3, 'Level 3'], [0, 'Tunnels']];
 	/** The colosseum rooms' names; which of a room's six gates each of its four cells is, round from the way in. */
 	const ROOM_NAMES = {classic: 'Standard', ring: 'Ring', column: 'Cylinder'};
@@ -35,6 +35,8 @@
 		folder: null,
 		folderLive: false,
 		map: false,
+		/** The Conquest tab: the game's Conquest admin settings (src/conquest.js), not a file of this app's. */
+		cq: false,
 		mapLevel: 1,
 		mapRoom: null,
 		mapView: null,
@@ -338,6 +340,7 @@
 				saveDraft();
 			}});
 		const top = document.getElementById('top');
+		if (S.cq) return top.replaceChildren(h('div', {class: 'brand'}, h('i', {}, 'F'), 'NBT Builder'), seg(MODES, 'conquest', setMode, 'big'), ...Conquest.top());
 		keepFocus(top, () => top.replaceChildren(...[
 			h('div', {class: 'brand'}, h('i', {}, 'F'), 'NBT Builder'),
 			seg(MODES, S.map ? 'map' : S.mode, setMode, 'big'),
@@ -354,18 +357,31 @@
 
 	function setMode(mode) {
 		commit();
+		if (S.cq) Conquest.commit();
+		S.cq = mode === 'conquest';
 		S.map = mode === 'map';
-		S.mode = S.map ? 'temple' : mode;
+		if (!S.cq) S.mode = S.map ? 'temple' : mode;
+		document.body.classList.toggle('cq-on', S.cq);
 		S.swap = null;
 		S.tuneOpen = null;
 		saveDraft();
 		render();
+		if (S.cq) Conquest.opened();
 	}
 
 	// --- rail ---
 
+	/** A panel redrawn for the Conquest tab, its scroll and its focused field kept. */
+	function cqDraw(root, nodes) {
+		const scroller = root.querySelector('.scroll'), at = scroller ? scroller.scrollTop : 0;
+		keepFocus(root, () => root.replaceChildren(...nodes()));
+		const next = root.querySelector('.scroll');
+		if (next) next.scrollTop = at;
+	}
+
 	function renderRail() {
 		const rail = document.getElementById('rail');
+		if (S.cq) return cqDraw(rail, Conquest.rail);
 		if (S.map) return rail.replaceChildren(...railMap());
 		const scroller = rail.querySelector('.scroll');
 		const top = scroller ? scroller.scrollTop : 0;
@@ -889,6 +905,7 @@
 
 	function renderEditor() {
 		const editor = document.getElementById('editor');
+		if (S.cq) return cqDraw(editor, Conquest.editor);
 		if (S.map) return renderMap(editor);
 		const scroller = editor.querySelector('.scroll');
 		const top = scroller ? scroller.scrollTop : 0;
@@ -1321,6 +1338,7 @@
 
 	function renderPalette() {
 		const root = document.getElementById('palette');
+		if (S.cq) return cqDraw(root, Conquest.side);
 		if (S.map) return root.replaceChildren(...mapSide());
 		const previous = searchBox();
 		if (!previous) {
@@ -1396,6 +1414,7 @@
 	// --- footer ---
 
 	function renderFoot() {
+		if (S.cq) return document.getElementById('foot').replaceChildren(...Conquest.foot());
 		if (S.map) return document.getElementById('foot').replaceChildren(h('div', {class: 'hints'},
 			h('span', {}, 'Scroll to zoom'), h('span', {}, 'Drag to move'), h('span', {}, 'Click a room for its details'),
 			h('span', {}, h('kbd', {}, '1'), '-', h('kbd', {}, '3'), ' level'), h('span', {}, h('kbd', {}, '0'), ' fit')));
@@ -1416,7 +1435,7 @@
 
 	function showKeys() {
 		const rows = [['/', 'Find a mob. "orc 5" adds five with Enter'], ['Enter', 'From a count, back to the mob search'], ['↑ ↓', 'In a count, up or down one (Shift for five)'],
-			['[ ]', 'Previous or next wave, cell or spawn'], ['Alt 1-4', 'Waves, Colosseum, Temple, Map'], ['0-9', 'Colosseum: put this cell in a group'],
+			['[ ]', 'Previous or next wave, cell or spawn'], ['Alt 1-5', 'Waves, Colosseum, Temple, Map, Conquest'], ['0-9', 'Colosseum: put this cell in a group'],
 			['Ctrl C / V', 'Copy or paste a whole line-up'], ['Ctrl Z / Y', 'Undo or redo'], ['Ctrl S / O', 'Save or open']];
 		ask('Keyboard', h('div', {class: 'keys'}, rows.flatMap(([k, t]) => [h('kbd', {}, k), h('span', {}, t)])));
 	}
@@ -1733,13 +1752,14 @@
 	document.addEventListener('keydown', e => {
 		if (document.querySelector('.veil')) return;
 		const ctrl = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+		if (S.cq && !e.altKey) return Conquest.keys(e);
 		if (S.map && !e.altKey) return mapKeys(e);
 		if (ctrl && key === 's') { e.preventDefault(); saveFile(); return; }
 		if (ctrl && key === 'o') { e.preventDefault(); openFile(); return; }
 		if (ctrl && key === 'k') { e.preventDefault(); searchBox()?.focus(); return; }
 		if (ctrl && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); travel(redo, undo, 'redo'); return; }
 		if (ctrl && key === 'z') { e.preventDefault(); travel(undo, redo, 'undo'); return; }
-		if (e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); setMode(MODES[+e.key - 1][0]); return; }
+		if (e.altKey && /^[1-9]$/.test(e.key) && MODES[+e.key - 1]) { e.preventDefault(); setMode(MODES[+e.key - 1][0]); return; }
 		if (typing(e.target)) return;
 		if (ctrl && key === 'c' && !String(window.getSelection())) { copyLines(); return; }
 		if (ctrl && key === 'v') { pasteLines(); return; }
@@ -1768,9 +1788,14 @@
 		dragging = 0;
 		dropZone.hidden = true;
 		const file = e.dataTransfer.files[0];
+		if (file && (S.cq || /\.json$/i.test(file.name))) {
+			if (!S.cq) setMode('conquest');
+			return Conquest.drop(file);
+		}
 		if (file) await loadBytes(file.name, new Uint8Array(await file.arrayBuffer()));
 	});
 	window.addEventListener('beforeunload', () => {
+		Conquest.commit();
 		commit();
 		saveDraft();
 	});
@@ -1781,6 +1806,8 @@
 	loadDraft();
 	for (const mode of Object.keys(S.docs)) last[mode] = snapshot(mode);
 	const back = Cloud.takeRedirect();
+	Conquest.init({h, s, btn, icon, seg, toast, ask, render, renderTop, renderRail, renderEditor, renderPalette, renderFoot,
+		folder: () => ({folder: S.folder, live: S.folder && S.folderLive}), hasFolderApi, linkFolder, ensureFolder});
 	render();
 	if (back === 'in') toast(`Signed in as ${Cloud.user()}`, 'good');
 	else if (back) toast(`Could not sign in: ${back}`, 'bad');
