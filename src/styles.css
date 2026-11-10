@@ -561,3 +561,27 @@ input[type="range"] { width: 100%; accent-color: var(--ember); height: 18px; }
 .cq-gf.set > span { color: var(--warn); }
 .cq-gf.set .cq-val { border-color: #5a4620; }
 .cq-gf.unsaved .cq-val { box-shadow: inset 3px 0 0 var(--ember); }
+
+/* Conquest: a corps' men, on the Corps page */
+.cq-corps { margin: 0 12px 12px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--bg); transition: background .6s; }
+.cq-corps.flash { background: var(--ember-soft); }
+.cq-corps-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); }
+.cq-corps-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.cq-corps-sum { flex: 1 1 260px; font-size: 12px; color: var(--ink-3); }
+.cq-corps-sum b { color: var(--ink-2); font-weight: 600; }
+.cq-men { display: flex; flex-direction: column; padding: 4px 6px; }
+.cq-man { display: grid; grid-template-columns: 22px minmax(100px, .8fr) minmax(130px, 1.1fr) minmax(130px, 1.1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 3px 4px; border-radius: 5px; }
+.cq-man:hover { background: var(--raised); }
+.cq-man.unsaved { box-shadow: inset 3px 0 0 var(--ember); }
+.cq-man-n { text-align: right; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cq-man select { height: 28px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, var(--bg)); min-width: 0; width: 100%; font-size: 12.5px; }
+.cq-man select:focus { border-color: var(--ember); outline: 0; }
+.cq-man select.set { border-color: #5a4620; color: var(--warn); }
+.cq-man-info { color: var(--ink-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-man-tools { display: flex; gap: 2px; }
+.cq-corps .cq-note { padding: 6px 12px 10px; font-size: 12px; color: var(--ink-3); border-top: 1px solid var(--line-soft); margin: 0; }
+.cq-change-corps .cq-delta { white-space: normal; }
+@media (max-width: 1250px) {
+	.cq-man { grid-template-columns: 22px minmax(90px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) auto; }
+	.cq-man-info { display: none; }
+}

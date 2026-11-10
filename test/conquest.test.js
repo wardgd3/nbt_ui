@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 global.CONQUEST = require('../src/conquestdata.js');
+global.DATA = require('../src/data.js');
 const Conquest = require('../src/conquest.js');
 const C = global.CONQUEST;
 const sample = fs.readFileSync(path.join(__dirname, 'ships_sample.json'), 'utf8');
@@ -77,4 +78,35 @@ test('the guns file: numbers only in, sorted out, clamped to the game\'s limits'
 	assert.deepStrictEqual(JSON.parse(Conquest._writeGuns()).guns, S.guns);
 	const glock = C.guns.guns.find(g => g.id === 'modern_warfare:glock_17');
 	assert.strictEqual(Conquest._ownOf(glock, 'price'), Math.max(1, Math.round(glock.price * 0.3)));
+});
+
+test('the corps page: its sliders read in their units, the men and guns editors found', () => {
+	assert.strictEqual(Conquest._show(at('CORPS_MAX'), 3), '3');
+	assert.strictEqual(Conquest._show(at('HC_SPAWN'), 0), 'Off');
+	assert.strictEqual(Conquest._show(at('CORPS_HEALTH'), 1.25), '125%');
+	assert.strictEqual(Conquest._show(at('STARTING_GOLD'), 1000), '1,000 g');
+	const corps = C.pages.find(p => p.key === 'corps');
+	assert.deepStrictEqual(corps.sections.flatMap(s => s.sliders.filter(sl => sl.special === 'corps').map(sl => sl.side)), ['allied', 'hostile']);
+	assert.ok(C.corps.roles.length >= 7 && C.corps.maxMen > 0);
+	assert.strictEqual(C.corps.defaults.allied.length, 8);
+});
+
+test('the corps file reads as the game reads it, and writes back the same', () => {
+	assert.deepStrictEqual(Conquest._parseCorps(null), Conquest._corpsDefaults(), 'no file: the default corps');
+	const got = Conquest._parseCorps(JSON.stringify({allied: [
+		{role: 'GUNNER', primary: 'modern_warfare:pkm', sidearm: 'none'},
+		{role: 'chef', primary: 'modern_warfare:rpg_7', sidearm: 'modern_warfare:m16a4'},
+		...Array(20).fill({role: 'medic', primary: '', sidearm: ''})]}));
+	assert.deepStrictEqual(got.allied[0], {role: 'gunner', primary: 'modern_warfare:pkm', sidearm: 'none'});
+	assert.deepStrictEqual(got.allied[1], {role: 'rifleman', primary: '', sidearm: ''}, 'an unknown role is a Rifleman; a launcher or a rifle as sidearm, his own');
+	assert.strictEqual(got.allied.length, C.corps.maxMen);
+	assert.deepStrictEqual(got.hostile, Conquest._corpsDefaults().hostile, 'a side the file leaves out keeps its defaults');
+	assert.throws(() => Conquest._parseCorps('{"v0": 1}'));
+	const S = Conquest._state;
+	S.corps = got;
+	S.corpsBase = Conquest._corpsDefaults();
+	assert.deepStrictEqual(Conquest._corpsPending(), ['allied']);
+	assert.deepStrictEqual(Conquest._parseCorps(Conquest._writeCorps()), got);
+	S.corpsBase = JSON.parse(JSON.stringify(got));
+	assert.deepStrictEqual(Conquest._corpsPending(), []);
 });

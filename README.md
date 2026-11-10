@@ -22,7 +22,7 @@ The Map tab shows Levels 1 to 3 of the Temple from above, with the roof off, in 
 
 ## Conquest
 
-The Conquest tab edits the game's Conquest admin settings: every slider on the in-game Conquest admin page, laid out by the same pages (Vehicles, Rewards, Base, Ordnance, Admin) and sections. The game keeps them in the instance's `config/modern_warfare_ships.json`, which the tab reads and writes directly. That file name is fixed, so this is the one save with no Save dialog.
+The Conquest tab edits the game's Conquest admin settings: every slider on the in-game Conquest admin page, laid out by the same pages (Vehicles, Rewards, Base, Ordnance, Munitions, Corps, Admin) and sections. The game keeps them in the instance's `config/modern_warfare_ships.json`, which the tab reads and writes directly. That file name is fixed, so this is the one save with no Save dialog.
 
 - **Load** reads the file from the linked game folder. The tab also reads it on its own when you open it, if nothing here is unsaved.
 - **Save** (`Ctrl+S`) writes it back. If an admin changed sliders in game since you loaded, it lists those changes and keeps them unless you overwrite them.
@@ -42,7 +42,16 @@ The **Guns** page (after Munitions) adjusts every gun the shop sells, by tier. I
 - Saved to `config/fight_arena_conquest_guns.json`. Fight Arena reads it in Conquest worlds when a world starts and whenever a player joins (`game/ConquestGuns.java`), over the world's own gun settings.
 - The gun list and each gun's own figures come from `config/fight_arena_conquest_guns.catalog.json`, which Fight Arena writes on every start. Load reads the game's copy; `npm run gen:conquest` builds one in.
 
-`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java`, FightArenaMod's `ConquestAdminScreen.java` and lang file, and the gun catalog. After a slider or gun is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
+### Corps
+
+The **Corps** page has the in-game sliders for your corps and the hostile one (how many, health, gun damage, the hostile spawn chance and cap), and under each the corps' men, as the in-game "Edit..." button has them.
+
+- **Per man:** role, main gun and sidearm. Left at "(role's)", he carries his role's own gun for that side; a sidearm can also be none. Add, copy, move or remove men, up to 16. **Copy** makes one side the same as the other, and **Defaults** puts the game's eight back.
+- The line above the men adds up the corps' health at its Health setting, and the Economy view sets the two corps side by side.
+- Saved to `config/fight_arena_conquest_corps.json`, the file the in-game editor writes. Fight Arena reads it **when Minecraft starts**, so a save reaches the game after a restart. A Save in the in-game editor before then replaces it. If the game changed the file since Load, Save asks first.
+- Roles, their health and guns, and the default men are read from FightArenaMod's `CorpsRole.java` and `CorpsConfig.java`; the guns a man may carry come from `src/data.js`.
+
+`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java`, FightArenaMod's `ConquestAdminScreen.java`, `CorpsRole.java`, `CorpsConfig.java` and lang file, and the gun catalog. After a slider or gun is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
 
 ## Cloud
 
