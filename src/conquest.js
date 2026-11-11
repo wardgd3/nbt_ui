@@ -42,7 +42,7 @@ const Conquest = (() => {
 	C.pages.forEach((p, pi) => p.sections.forEach((sec, si) => sec.sliders.forEach(sl => { if (sl.i != null) where[sl.i] = {pi, si, sl}; })));
 	const SECONDS = new Set(['TK_SMOKE_COOLDOWN', 'TK_SMOKE_LINGER', 'TURN_SECONDS']);
 	const BLOCKS = new Set(['TK_SMOKE_SIZE', 'DRONE_RANGE', 'BASE_DETECT', 'MISSILE_RANGE', 'SONAR_RANGE']);
-	const GOLD_ALSO = new Set(['TURN_GOLD', 'REDEPLOY_PRICE', 'REACTOR_REPAIR', 'STARTING_GOLD']);
+	const GOLD_ALSO = new Set(['TURN_GOLD', 'REDEPLOY_PRICE', 'REACTOR_REPAIR', 'STARTING_GOLD', 'STATION_COST']);
 
 	/** How a setting reads: its kind, decides the unit shown, what the number box holds, and whether 0 reads Off. */
 	function kind(i) {
@@ -54,16 +54,25 @@ const Conquest = (() => {
 		if (SECONDS.has(n)) return {k: 's'};
 		if (n === 'REDEPLOY_TIME') return {k: 'mmss'};
 		if (BLOCKS.has(n)) return {k: 'm'};
-		if (n === 'BS_MISSILE_CAP' || n === 'CORPS_MAX' || n === 'HC_CAP') return {k: 'n'};
+		if (n === 'BS_MISSILE_CAP' || n === 'CORPS_MAX' || n === 'HC_CAP' || n === 'BS_CARRY_CAP' || n === 'BS_BOAT_COUNT') return {k: 'n'};
+		if (n === 'BS_CIWS_RANGE') return {k: 'm', off: true};
+		if (n === 'BS_DEPLOY_RANGE' || n === 'BS_CARRY_RANGE' || n === 'BS_BOAT_GUARD' || n === 'BS_BOAT_RANGE') return {k: 'm'};
+		if (n === 'BS_BOAT_REBUILD') return {k: 'mmss'};
+		if (n === 'HBASE_COUNT') return {k: 'n', off: true};
+		if (n === 'HBASE_PATROLS' || n === 'HBASE_GARRISON' || n === 'HBASE_TURRETS') return {k: 'n'};
+		if (n === 'HBASE_SPAWN' || n === 'HOSTILE_SPAWN') return {k: 'pct', off: true};
+		if (n === 'HBASE_SPACING' || n === 'HBASE_PATROL_RADIUS' || n === 'HBASE_ATTACK_RANGE' || n === 'HBASE_TURRET_RANGE') return {k: 'm'};
+		if (n === 'HBASE_REINFORCE') return {k: 'mmss', off: true};
 		if (n === 'HC_SPAWN') return {k: 'pct', off: true};
 		if (n === 'REACTOR_HP') return {k: 'hp'};
+		if (n === 'VEHICLE_FUEL' || n === 'FUEL_COAL') return {k: 'gal'};
 		if (n === 'MUN_GUN_PCT' || n === 'MUN_AMMO_PCT') return {k: 'share'};
 		if (/^(PRICE_|REWARD_|UP_|MUN_)/.test(n) || GOLD_ALSO.has(n)) return {k: 'gold'};
 		if (n === 'SHIELD_COST' || n === 'REACTOR_RATE') return {k: 'mj'};
 		return {k: 'pct'};
 	}
 	const isPct = i => ['pct', 'zoom'].includes(kind(i).k);
-	const UNIT = {pct: '%', zoom: '±%', rounds: 'rounds', s: 's', mmss: 's', m: 'm', n: '', hp: 'HP', gold: 'g', mj: 'MJ/s', share: '% of shop'};
+	const UNIT = {pct: '%', zoom: '±%', rounds: 'rounds', s: 's', mmss: 's', m: 'm', n: '', hp: 'HP', gold: 'g', mj: 'MJ/s', share: '% of shop', gal: 'gal/min'};
 	const comma = n => Math.round(n).toLocaleString('en-US');
 	const mmss = v => `${Math.floor(Math.round(v) / 60)}:${String(Math.round(v) % 60).padStart(2, '0')}`;
 
@@ -80,6 +89,7 @@ const Conquest = (() => {
 			case 'hp': return `${comma(v)} HP`;
 			case 'gold': return `${comma(v)} g`;
 			case 'mj': return `${comma(v)} MJ/s`;
+			case 'gal': return `${comma(v)} gal/min`;
 			case 'share': return `${Math.round(v)}% of shop`;
 			default: return comma(v);
 		}
@@ -305,12 +315,18 @@ const Conquest = (() => {
 		return {values, extra, known};
 	}
 
+	/** How many settings a file has past the ones this app knows (its data older than the game). */
+	function unknownSettings(extra) {
+		return Object.keys(extra).filter(k => /^v\d+$/.test(k)).length;
+	}
+
 	function write() {
 		const o = {};
 		S.values.forEach((v, i) => { o[`v${i}`] = tidy(v); });
 		Object.assign(o, S.extra);
-		// The mark the game leaves once it has put the Brawler's gun back to its bare 30 rounds: present, so it never does it again over these values.
-		o.brMgBare = 1;
+		// The marks the game leaves once it has done a one-time fix-up (the Brawler's bare gun, the carrier's doubled reach...):
+		// present, so it never does them again over these values.
+		for (const m of C.marks || ['brMgBare']) o[m] = 1;
 		return JSON.stringify(o, null, 2);
 	}
 
@@ -359,6 +375,8 @@ const Conquest = (() => {
 		saveDraft();
 		A.render();
 		const changed = got.values.filter((v, i) => !same(v, C.def[i])).length, g = gunsSet();
+		const newer = unknownSettings(got.extra);
+		if (newer) A.toast(`The game has ${newer} setting${newer === 1 ? '' : 's'} this app does not know yet - kept as they are. Restart the app (npm start refreshes it) or run npm run gen:conquest.`, 'bad');
 		A.toast(`${from}: ${changed} setting${changed === 1 ? '' : 's'} differ from the defaults${g ? ` · ${g} gun figure${g === 1 ? '' : 's'} set` : ''}${got.known < C.count ? ` · ${C.count - got.known} not in the file yet, at their defaults` : ''}`, 'good');
 	}
 
@@ -461,6 +479,11 @@ const Conquest = (() => {
 					}
 				}
 			}
+			if (current != null) {
+				try {
+					Object.assign(S.extra, parse(current).extra);
+				} catch { /* the game's file unreadable: nothing in it to keep */ }
+			}
 			const text = write();
 			const out = await (await fileHandle(true)).createWritable();
 			await out.write(text);
@@ -542,7 +565,7 @@ const Conquest = (() => {
 			const got = parse(text);
 			commit();
 			S.values = got.values;
-			for (const [k, v] of Object.entries(got.extra)) if (k !== 'brMgBare') S.extra[k] = v;
+			for (const [k, v] of Object.entries(got.extra)) if (!(C.marks || ['brMgBare']).includes(k)) S.extra[k] = v;
 			commit();
 			A.render();
 			A.toast(`Opened ${file.name}${S.base ? `: ${pending().length} change${pending().length === 1 ? '' : 's'} from the game's file, not saved yet` : ''}`, 'good');
@@ -1153,12 +1176,60 @@ const Conquest = (() => {
 				A.h('p', {}, `${comma(val('TURN_GOLD'))} gold every ${Math.round(val('TURN_SECONDS'))} s · ${comma(perSec * 3600)} an hour, for every player online.`),
 				C.names.includes('STARTING_GOLD') ? A.h('p', {}, `Players start with ${comma(val('STARTING_GOLD'))} gold${perSec > 0 ? `, ${span(val('STARTING_GOLD') / perSec)} of turn income` : ''}.`) : null),
 			corpsEconomy(),
+			hostilesEconomy(),
+			fuelEconomy(perSec),
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Power'),
 				A.h('p', {}, reactor > 0 ? `A base shield (${comma(shield)} MJ/s) takes ${(shield / reactor).toFixed(1)} reactor${shield / reactor === 1 ? '' : 's'} at ${comma(reactor)} MJ/s each.` : 'Reactors make no power.')),
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'What things cost'), A.h('p', {class: 'cq-hint'}, 'Price, then how long the turn income takes to pay for it.'), table(costs, 'Time to earn')),
 			munGunsCard(perSec),
 			A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'What kills earn'), A.h('p', {class: 'cq-hint'}, 'Reward, then the turn income it equals.'), table(rewards, 'Turn income it equals')),
 		];
+	}
+
+	const has = name => C.names.includes(name);
+	const at = name => C.names.indexOf(name);
+	/** "Hostile spawn rate (all)": every hostile spawn chance is multiplied by it. */
+	const allSpawn = () => (has('HOSTILE_SPAWN') ? val('HOSTILE_SPAWN') : 1);
+	const pct = v => `${Math.round(v * 100)}%`;
+
+	/** Each hostile spawn chance as the game uses it (its own × all), and what the hostile bases add up to. */
+	function hostilesEconomy() {
+		const spawns = ['HT_SPAWN', 'HB_SPAWN', 'HC_SPAWN', 'HBASE_SPAWN'].filter(n => has(n) && where[at(n)]);
+		if (!spawns.length) return null;
+		const all = allSpawn();
+		const rows = spawns.map(n => {
+			const i = at(n), sec = C.pages[where[i].pi].sections[where[i].si].label, own = S.values[i];
+			return A.h('button', {type: 'button', class: 'cq-econ-row', title: placeOf(i), onclick: () => reveal(i)},
+				A.h('span', {}, sec, A.h('small', {}, `${label(i)} ${own > 0 ? pct(own) : 'off'} × all ${pct(all)}`)),
+				A.h('b', {}, own * all > 0 ? pct(own * all) : 'Off'), A.h('em'));
+		});
+		const out = [A.h('div', {class: 'cq-econ'}, rows)];
+		if (has('HBASE_COUNT')) {
+			const n = Math.round(val('HBASE_COUNT')), squads = Math.round(val('HBASE_PATROLS')) + Math.round(val('HBASE_GARRISON')), turrets = Math.round(val('HBASE_TURRETS'));
+			const back = val('HBASE_REINFORCE');
+			out.push(A.h('p', {}, n > 0
+				? `${n} hostile base${n === 1 ? '' : 's'} a world, ${comma(val('HBASE_SPACING'))} m apart: ${comma(n * squads)} squads (${Math.round(val('HBASE_PATROLS'))} patrolling, ${Math.round(val('HBASE_GARRISON'))} on guard at each) and ${comma(n * turrets)} turrets in all. Each base has a ${Math.round(val('HBASE_TANK_CHANCE') * 100)}% chance of a tank. ${back > 0 ? `A lost patrol is back in ${mmss(back)}` : 'A lost patrol is not replaced'}${has('REWARD_LOOT_CHEST') ? `, and each loot chest pays ${comma(val('REWARD_LOOT_CHEST'))} g the first time it is opened` : ''}.`
+				: 'No hostile bases are placed in a world.'));
+		}
+		return A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Hostiles'), A.h('p', {class: 'cq-hint'}, `Each spawn chance as the game uses it: its own times Hostile spawn rate (all), now ${pct(all)}.`), out);
+	}
+
+	/** Fuel: how far the starting tank goes, how many vehicles a coal station keeps going, and what a station costs. */
+	function fuelEconomy(perSec) {
+		const F = C.fuel;
+		if (!F || !has('VEHICLE_FUEL') || !has('FUEL_COAL')) return null;
+		const burn = val('VEHICLE_FUEL'), make = val('FUEL_COAL'), cost = has('STATION_COST') ? val('STATION_COST') : 0;
+		const mins = m => span(m * 60);
+		const lines = burn <= 0 ? [A.h('p', {}, 'Vehicles burn no fuel.')] : [
+			A.h('div', {class: 'cq-econ'},
+				A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => reveal(at('VEHICLE_FUEL'))}, A.h('span', {}, 'Starting fuel', A.h('small', {}, `${comma(F.start)} gal, one vehicle out`)), A.h('b', {}, mins(F.start / burn)), A.h('em')),
+				A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => reveal(at('VEHICLE_FUEL'))}, A.h('span', {}, 'Four vehicles out', A.h('small', {}, `${comma(4 * burn)} gal/min`)), A.h('b', {}, mins(F.start / (4 * burn))), A.h('em')),
+				A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => reveal(at('FUEL_COAL'))}, A.h('span', {}, 'One coal station', A.h('small', {}, `${comma(make)} gal/min`)),
+					A.h('b', {}, `${+(make / burn).toFixed(1)} vehicles`), A.h('em', {title: 'Kept going for good'}, 'for good')),
+				A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => reveal(at('FUEL_COAL'))}, A.h('span', {}, `The most, ${F.maxStations} stations`, A.h('small', {}, `${comma(make * F.maxStations)} gal/min`)),
+					A.h('b', {}, `${+(make * F.maxStations / burn).toFixed(1)} vehicles`), A.h('em', {}, 'for good'))),
+			cost ? A.h('p', {}, `A mining station costs ${comma(cost)} g${perSec > 0 ? `, ${span(cost / perSec)} of turn income` : ''}.`) : null];
+		return A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Fuel'), A.h('p', {class: 'cq-hint'}, 'How long fuel lasts, and how many vehicles stations keep running.'), lines);
 	}
 
 	/** The two corps side by side: men, health in all, gun damage, and how many may be out. */
@@ -1168,7 +1239,7 @@ const Conquest = (() => {
 		const line = (side, most) => A.h('button', {type: 'button', class: 'cq-econ-row', onclick: () => revealCorps(side)},
 			A.h('span', {}, SIDE_NAME[side], A.h('small', {}, `${S.corps[side].length} men · ${Math.round(val(DAMAGE_OF[side]) * 100)}% gun damage`)),
 			A.h('b', {}, `${comma(hp(side))} HP`), A.h('em', {title: 'How many may be out at once'}, most));
-		const spawn = val('HC_SPAWN');
+		const spawn = val('HC_SPAWN') * allSpawn();
 		return A.h('div', {class: 'cq-card'}, A.h('h3', {}, 'Corps'), A.h('p', {class: 'cq-hint'}, 'Men, health in all at the Health setting, and how many may be out.'),
 			A.h('div', {class: 'cq-econ'}, line('allied', `${Math.round(val('CORPS_MAX'))} each`), line('hostile', spawn > 0 ? `${Math.round(val('HC_CAP'))} at once` : 'off')),
 			A.h('p', {}, `A player's ${Math.round(val('CORPS_MAX'))} corps field ${comma(hp('allied') * val('CORPS_MAX'))} HP in all; the hostile ones at most ${comma(hp('hostile') * val('HC_CAP'))} HP${spawn > 0 ? ` (spawn chance ${Math.round(spawn * 100)}%)` : ', but they are off'}.`));

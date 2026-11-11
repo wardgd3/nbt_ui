@@ -110,3 +110,30 @@ test('the corps file reads as the game reads it, and writes back the same', () =
 	S.corpsBase = JSON.parse(JSON.stringify(got));
 	assert.deepStrictEqual(Conquest._corpsPending(), []);
 });
+
+test('every mark the game leaves is written, and settings the app does not know are kept', () => {
+	const S = Conquest._state;
+	S.values = C.def.slice();
+	assert.ok(C.marks.includes('carry96'));
+	const later = Conquest._parse(JSON.stringify({v0: 1, [`v${C.count}`]: 7, [`v${C.count + 1}`]: 8}));
+	S.extra = later.extra;
+	const o = JSON.parse(Conquest._write());
+	for (const m of C.marks) assert.strictEqual(o[m], 1, m);
+	assert.strictEqual(o[`v${C.count}`], 7);
+	assert.strictEqual(o[`v${C.count + 1}`], 8);
+});
+
+test('hostile base settings read in the in-game units', () => {
+	assert.strictEqual(Conquest._show(at('HBASE_ATTACK_RANGE'), 48), '48 m');
+	assert.strictEqual(Conquest._show(at('HBASE_REINFORCE'), 300), '5:00');
+	assert.strictEqual(Conquest._show(at('HBASE_REINFORCE'), 0), 'Off');
+	assert.strictEqual(Conquest._show(at('HBASE_COUNT'), 8), '8');
+	assert.strictEqual(Conquest._show(at('HBASE_TANK_CHANCE'), 0.35), '35%');
+	assert.strictEqual(Conquest._show(at('REWARD_LOOT_CHEST'), 150), '150 g');
+});
+
+test('the fuel figures come from the mods', () => {
+	assert.ok(C.fuel && C.fuel.start > 0 && C.fuel.maxStations > 0);
+	assert.strictEqual(Conquest._show(at('FUEL_COAL'), 50), '50 gal/min');
+	assert.strictEqual(Conquest._show(at('HOSTILE_SPAWN'), 0), 'Off');
+});

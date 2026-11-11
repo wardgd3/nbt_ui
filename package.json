@@ -4,6 +4,7 @@
   "private": true,
   "description": "Fight Arena NBT builder: waves, Colosseum and Temple files",
   "scripts": {
+    "prestart": "node tools/gen-conquest.js || exit 0",
     "start": "node tools/serve.js",
     "gen": "node tools/gen-data.js && node tools/gen-map.js && node tools/gen-conquest.js",
     "gen:conquest": "node tools/gen-conquest.js",

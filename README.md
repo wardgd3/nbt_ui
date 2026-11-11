@@ -22,14 +22,14 @@ The Map tab shows Levels 1 to 3 of the Temple from above, with the roof off, in 
 
 ## Conquest
 
-The Conquest tab edits the game's Conquest admin settings: every slider on the in-game Conquest admin page, laid out by the same pages (Vehicles, Rewards, Base, Ordnance, Munitions, Corps, Admin) and sections. The game keeps them in the instance's `config/modern_warfare_ships.json`, which the tab reads and writes directly. That file name is fixed, so this is the one save with no Save dialog.
+The Conquest tab edits the game's Conquest admin settings: every slider on the in-game Conquest admin page, laid out by the same pages (Vehicles, Rewards, Base, Fuel, Ordnance, Munitions, Corps, Hostiles, Admin) and sections. The game keeps them in the instance's `config/modern_warfare_ships.json`, which the tab reads and writes directly. That file name is fixed, so this is the one save with no Save dialog.
 
 - **Load** reads the file from the linked game folder. The tab also reads it on its own when you open it, if nothing here is unsaved.
 - **Save** (`Ctrl+S`) writes it back. If an admin changed sliders in game since you loaded, it lists those changes and keeps them unless you overwrite them.
-- The game reads the file when a world starts and whenever a player joins, so a running world picks a save up on the next join.
+- A running game picks a save up within two seconds and sends it to everyone (it watches the file), as well as on world start and every join. Settings the app does not know yet (its data older than the game) are kept as the file has them, and Load says so; every fix-up mark the game leaves (`brMgBare`, `carry96`...) is written. A file missing settings or out of range is written out whole by the game the next time it reads it.
 - **Import** and **Export** open or download a settings `.json`. Without a linked folder, Save downloads it.
 - Each row has a slider, an exact number box, a tick at the default and a reset button. `/` searches every setting, and **Changed** shows only settings off their defaults.
-- The right panel lists every change a save would make. Its **Economy** view shows turn income, what each price costs in income time, and how many reactors a shield needs.
+- The right panel lists every change a save would make. Its **Economy** view shows turn income and starting gold, what each price costs in income time, and how many reactors a shield needs. It also shows each hostile spawn chance as the game uses it (its own times Hostile spawn rate (all)) with what the hostile bases add up to, and how long fuel lasts and how many vehicles a coal station keeps running.
 - **Free** is kept by the world, not the file, so it stays an in-game switch.
 
 ### Guns
@@ -39,7 +39,7 @@ The **Guns** page (after Munitions) adjusts every gun the shop sells, by tier. I
 - **Per gun:** damage (the whole shot at the muzzle), range, full-damage range, fire rate, Full Auto rate where the gun has one, and recoil.
 - **Tier III guns** also get a Munitions Chest price in gold. Left blank, they cost the Munitions page's share of their shop price.
 - A blank box keeps the gun as built; the grey figure shows what that is. **Whole tier** sets damage, fire rate or recoil on every gun in a tier as a percent of each one as built.
-- Saved to `config/fight_arena_conquest_guns.json`. Fight Arena reads it in Conquest worlds when a world starts and whenever a player joins (`game/ConquestGuns.java`), over the world's own gun settings.
+- Saved to `config/fight_arena_conquest_guns.json`. Fight Arena reads it in Conquest worlds when a world starts, whenever a player joins, and within two seconds of a save while it runs (`game/ConquestGuns.java`), over the world's own gun settings.
 - The gun list and each gun's own figures come from `config/fight_arena_conquest_guns.catalog.json`, which Fight Arena writes on every start. Load reads the game's copy; `npm run gen:conquest` builds one in.
 
 ### Corps
@@ -48,10 +48,10 @@ The **Corps** page has the in-game sliders for your corps and the hostile one (h
 
 - **Per man:** role, main gun and sidearm. Left at "(role's)", he carries his role's own gun for that side; a sidearm can also be none. Add, copy, move or remove men, up to 16. **Copy** makes one side the same as the other, and **Defaults** puts the game's eight back.
 - The line above the men adds up the corps' health at its Health setting, and the Economy view sets the two corps side by side.
-- Saved to `config/fight_arena_conquest_corps.json`, the file the in-game editor writes. Fight Arena reads it **when Minecraft starts**, so a save reaches the game after a restart. A Save in the in-game editor before then replaces it. If the game changed the file since Load, Save asks first.
+- Saved to `config/fight_arena_conquest_corps.json`, the file the in-game editor writes. Fight Arena reads it again whenever it changes, the next time a corps is raised or the in-game editor opens, so a save reaches a running game with no restart. If the game changed the file since Load, Save asks first.
 - Roles, their health and guns, and the default men are read from FightArenaMod's `CorpsRole.java` and `CorpsConfig.java`; the guns a man may carry come from `src/data.js`.
 
-`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java`, FightArenaMod's `ConquestAdminScreen.java`, `CorpsRole.java`, `CorpsConfig.java` and lang file, and the gun catalog. After a slider or gun is added in game, run `npm run gen:conquest` (also part of `npm run gen`).
+`src/conquestdata.js` is generated from ModernWarfareMod's `ShipTuning.java`, FightArenaMod's `ConquestAdminScreen.java`, `CorpsRole.java`, `CorpsConfig.java` and lang file, and the gun catalog. After a slider or gun is added in game, run `npm run gen:conquest` (also part of `npm run gen`). `npm start` runs it first, so the app is current whenever it is started with the mods beside it; if the mods are not there, it starts with the data it has.
 
 ## Cloud
 

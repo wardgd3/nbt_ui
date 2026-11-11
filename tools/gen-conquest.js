@@ -17,7 +17,8 @@ const fail = why => { throw new Error(`gen-conquest: ${why}`); };
 const noComments = src => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
 function tuning() {
-	const src = noComments(fs.readFileSync(TUNING, 'utf8'));
+	const raw = fs.readFileSync(TUNING, 'utf8');
+	const src = noComments(raw);
 	const ints = /public static final int (SUB_SPEED[\s\S]*?);/.exec(src) || fail('ShipTuning has no SUB_SPEED constants');
 	const index = {};
 	for (const [, name, n] of ints[1].matchAll(/(\w+)\s*=\s*(\d+)/g)) index[name] = +n;
@@ -33,7 +34,12 @@ function tuning() {
 		return list;
 	};
 	const rounds = /ORD_ROUNDS = \{([^}]*)\}/.exec(src);
-	return {index, ordField, count, min: floats('MIN'), max: floats('MAX'), def: floats('DEFAULT'),
+	// the marks save() leaves in the file once a one-time fix-up is done (brMgBare, carry96...): the app writes them all,
+	// or the game would redo the fix-up over the app's values
+	const saveFn = /private static void save\(\) \{([\s\S]*?)\n\t\}/.exec(src) || fail('ShipTuning has no save()');
+	const marks = [...saveFn[1].matchAll(/addProperty\("(\w+)",\s*1\)/g)].map(m => m[1]);
+	if (!marks.length) fail('ShipTuning.save() writes no marks');
+	return {index, ordField, count, marks, min: floats('MIN'), max: floats('MAX'), def: floats('DEFAULT'),
 		rounds: rounds ? [...rounds[1].matchAll(/"(\w+)"/g)].map(m => m[1]) : []};
 }
 
@@ -48,16 +54,19 @@ function screen(t) {
 		if ((m = /^b\s*\+\s*ShipTuning\.(\w+)$/.exec(expr))) return ctx.b + (t.ordField[m[1]] ?? fail(`unknown ShipTuning.${m[1]}`));
 		if (expr === 'price') return ctx.price;
 		if (/AdminShipTuningPayload\.FREE/.test(expr)) return 'free';
+		// in-game buttons (Kill all, Spawn near me): they act on the running world, not the file
+		if (/^AdminShipTuningPayload\.(KILL|SPAWN)_\w+$/.test(expr)) return 'button';
 		if (expr === 'EDIT_ALLIED') return 'corps:allied';
 		if (expr === 'EDIT_HOSTILE') return 'corps:hostile';
 		return fail(`cannot read the slider ${expr}`);
 	};
 	const sliders = (body, ctx) => [...body.matchAll(/new Slider\(([^,]+),\s*"(\w+)",\s*([\d.]+)F?\)/g)].map(([, expr, key, step]) => {
 		const i = at(expr, ctx);
+		if (i === 'button') return null;
 		if (i === 'free') return {special: 'free', key, label: label(key)};
 		if (typeof i === 'string') return {special: 'corps', side: i.slice(6), key, label: label(key)};
 		return {i, key, label: label(key), step: +step};
-	});
+	}).filter(Boolean);
 	const arrays = {};
 	for (const [, name, body] of src.matchAll(/private static final Slider\[\] (\w+) = \{([\s\S]*?)\};/g)) arrays[name] = body;
 	// ordnance(round): its price, then the four ORD_ multiples from ORD_BASE + round * 4
@@ -72,7 +81,9 @@ function screen(t) {
 	for (const [, name, body] of src.matchAll(/private static final Section\[\] (\w+) = \{([\s\S]*?)\};/g)) {
 		sectionLists[name] = [...body.matchAll(/new Section\("(\w+)",\s*(ordnance\((\d+)\)|new Slider\[\]\{([\s\S]*?)\}|\w+),\s*(true|false)\)/g)]
 			.map(([, key, ref, round, inline, folds]) => ({key, label: label(key), folds: folds === 'true',
-				sliders: round != null ? ordnance(+round) : inline != null ? sliders(inline) : sliders(arrays[ref] ?? fail(`no Slider[] ${ref}`))}));
+				sliders: round != null ? ordnance(+round) : inline != null ? sliders(inline) : sliders(arrays[ref] ?? fail(`no Slider[] ${ref}`))}))
+			// a section of in-game buttons only (the Hostiles page's Kill all) has nothing for the file
+			.filter(sec => sec.sliders.length);
 	}
 	const pagesSrc = /Page\[\] PAGES = \{([\s\S]*?)\};/.exec(src) || fail('no PAGES');
 	const pages = [...pagesSrc[1].matchAll(/new Page\("(\w+)",\s*(\w+)\)/g)].map(([, key, list]) => ({key, label: label(key), sections: sectionLists[list] ?? fail(`no Section[] ${list}`)}));
@@ -102,6 +113,14 @@ function corps() {
 	return {roles, defaults: {allied: men(lists[1]), hostile: men(lists[2])}, maxMen: +max[1], none: none ? none[1] : 'none'};
 }
 
+// Fuel (MW Fuel and MiningStations): the gallons a player starts with, and the most mining stations a player may run.
+function fuel() {
+	const dir = path.dirname(TUNING), read = f => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), 'utf8') : '');
+	const start = /double START = ([\d.]+)/.exec(read('Fuel.java')), max = /int MAX = (\d+)/.exec(read('MiningStations.java'));
+	if (!start || !max) console.warn('gen-conquest: could not read Fuel.START or MiningStations.MAX - the Economy fuel card is left out');
+	return start && max ? {start: +start[1], maxStations: +max[1]} : null;
+}
+
 const t = tuning();
 const {pages} = screen(t);
 const names = Array(t.count).fill(null);
@@ -115,6 +134,6 @@ const CATALOGS = [path.join(HOME, 'curseforge/minecraft/Instances/Fight Arena/co
 	.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 const guns = CATALOGS.length ? JSON.parse(fs.readFileSync(CATALOGS[0], 'utf8')) : null;
 if (!guns) console.warn('gen-conquest: no gun catalog yet - start the game or the dev server once with the current Fight Arena');
-const data = {generated: new Date().toISOString(), count: t.count, names, min: t.min, max: t.max, def: t.def, ordBase: t.index.ORD_BASE, rounds: t.rounds, pages, hidden, guns, corps: corps()};
+const data = {generated: new Date().toISOString(), count: t.count, marks: t.marks, names, min: t.min, max: t.max, def: t.def, ordBase: t.index.ORD_BASE, rounds: t.rounds, pages, hidden, guns, corps: corps(), fuel: fuel()};
 fs.writeFileSync(OUT, `// Generated by tools/gen-conquest.js from ShipTuning and ConquestAdminScreen - do not edit.\nconst CONQUEST = ${JSON.stringify(data)};\nif (typeof module !== 'undefined') module.exports = CONQUEST;\n`);
 console.log(`conquestdata.js: ${t.count} settings, ${pages.length} pages, ${guns ? guns.guns.length : 0} guns, ${data.corps.roles.length} corps roles, ${[...shown].filter(i => i != null).length} shown in game${hidden.length ? `, not on the in-game page: ${hidden.map(x => x.name).join(', ')}` : ''}`);
